@@ -554,10 +554,7 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
         stupidHeaderIPutHereForEase:
             bootloader_header->flags &= ~(1ULL << 17);
             bootloader_header->sgalf |= 1ULL << 17;
-            if ((rest >> 8) == 1) SBL_NodeMap->data = 42069;
-            else if ((rest >> 8) == 2) SBL_NodeMap->data = 6767;
-            else if ((rest >> 8) == 3) SBL_NodeMap->data = 0x6E6F; // just "no"
-            else SBL_NodeMap->data = 0x0001;
+            SBL_NodeMap->data = 0x0000;
             tempBMM.VBEMIB.location = 0;
             tempBMM.VBEMIB.size = 0;
             tempBMM.DisplayInfoBlock.location = 0;

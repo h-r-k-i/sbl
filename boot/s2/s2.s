@@ -238,6 +238,31 @@ stage5:
 
 ; S6: Load and jump to Stage 3 (addl unreal mode bullshit)
 stage6:
+    ; Set up the IDT and GDT
+    setup_idt:
+        mov ecx, 256
+        lea edi, [IDT]
+    
+    .loop69:
+        mov eax, shit_isr
+        mov word [edi], ax
+        mov word [edi+2], 0x08
+        mov byte [edi+4], 0
+        mov byte [edi+5], 0x8E
+        shr eax, 16
+        mov word [edi+6], ax
+
+        add edi, 8
+        dec ecx
+        jnz .loop69
+    
+    o32 mov eax, GDT_DESC
+    o32 mov ecx, 0x900
+    o32 mov [ecx], eax
+    o32 add ecx, 4
+    o32 mov eax, IDTR
+    o32 mov [ecx], eax
+    
     o32 mov eax, 0x4F4B454E ; NEKO (Magic Number)
     o32 mov ebx, SBL_Data
     o32 mov edx, [boot_drive]

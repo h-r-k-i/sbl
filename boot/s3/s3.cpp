@@ -15,6 +15,9 @@
 #include "disk.hpp"
 #include "pwm.hpp"
 #include "fatfsd.hpp"
+#include "elf.hpp"
+#include "sblheader.hpp"
+#include "protected.hpp"
 
 #ifdef BUILD_DEBUG
     #define DEBUG
@@ -63,7 +66,7 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
 
         char inputBuffer[256] = {0};
         Disk disk(edx & 0xFF, globalResult_16);
-        uint32_t KernelLoadPont = 0x0000;
+        uint32_t KernelLoadPoint = 0x0000;
 
         while (!ValidCommand) {
             printk("sbl.harukimedia.org# ");
@@ -91,7 +94,7 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                 uint8_t vbrSector[512];
                 disk.GetSectors(a.StartLBA, 1, vbrSector);
                 VBR* vbr = (VBR*)(vbrSector);
-                uint8_t* buffer = (uint8_t*)0xF000;
+                uint8_t* buffer = (uint8_t*)0x6000;
 
                 FAT12 fat12(disk, a.StartLBA);
                 FAT16 fat16(disk, a.StartLBA);
@@ -109,18 +112,149 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                     auto packet = fat->ResolvePath(inputBuffer);
                     if (packet.directoryState == DirectoryState::Found) {
                         printk("Found %s.\n", inputBuffer);
-                        FileContext context = {0, 0x20};
-                        if (fat->ReadFile(packet, buffer, packet.size)) {
-                            printk("File read successfully.\n");
-                            ValidCommand = true;
+                        if (packet.isDirectory) {
+                            printk("The file %s is a directory, not a file.\n", inputBuffer);
+                            continue;
                         }
-                        else printk("Failed to read file %s.\n", inputBuffer);
+                        if (packet.size < sizeof(ELFHeader) && packet.size < sizeof(SBLHeader)) {
+                            printk("What the fuck are you presenting to me?\n");
+                            continue;
+                        }
+                        FileContext context = {0, sizeof(ELFHeader)};
+                        if (!fat->StreamFile(packet, buffer, sizeof(ELFHeader), context)) {
+                            printk("1. Failed to read file %s.\n", inputBuffer);
+                            continue;
+                        }
+                        ELFHeader* elfHeader = (ELFHeader*)buffer;
+                        ELFHeaderValidationResult validationResult = ValidateELFHeader(*elfHeader);
+                        if (validationResult != ELFHeaderValidationResult::Good) {
+                            printk("Invalid ELF header for %s.\n", inputBuffer);
+                            continue;
+                        }
+                        bool isSBLFile = false;
+                        uint16_t sblSeekSize = [](uint64_t x, uint64_t y) -> uint16_t {
+                            return (x < y) ? x : y;
+                        }(SBL_MAX_REGION, packet.size);
+
+                        buffer = (uint8_t*)0xF000;
+                        context.size = sblSeekSize;
+                        if (!fat->StreamFile(packet, buffer, sblSeekSize, context)) {
+                            printk("Failed to read %s into memory.\n", inputBuffer);
+                            continue;
+                        }
+                        SBLHeader* sblHeader = (SBLHeader*)buffer;
+                        for (uint16_t i = 0; i <= sblSeekSize - sizeof(SBLHeader); i++) {
+                            sblHeader = (SBLHeader*)(buffer + i);
+                            if (!(sblHeader->magic[0] == 'N' && sblHeader->magic[1] == 'E' && sblHeader->magic[2] == 'K' && sblHeader->magic[3] == 'O' &&
+                                sblHeader->magic[4] == 'N' && sblHeader->magic[5] == 'E' && sblHeader->magic[6] == 'K' && sblHeader->magic[7] == 'O')) continue;
+                            uint64_t calculatedChecksum = crc64((uint8_t*)sblHeader, sizeof(SBLHeader) - sizeof(uint64_t));
+                            if (calculatedChecksum != sblHeader->checksum) continue;
+                            isSBLFile = true;
+                            break;
+                        }
+                        if (!isSBLFile) {
+                            printk("The file %s does not follow the Arc-C contract.\n", inputBuffer);
+                            continue;
+                        }
+                        if ((~(((SBL_Data*)ebx)->flags | ((SBL_Data*)ebx)->sgalf) & sblHeader->flags) != 0) {
+                            printk("This bootloader does not support the flags of %s.\n", inputBuffer);
+                            continue;
+                        }
+
+                        buffer = (uint8_t*)0x6000;
+                        context = {0, sizeof(ELFHeader)};
+                        if (!fat->StreamFile(packet, buffer, sizeof(ELFHeader), context)) {
+                            printk("2. Failed to read file %s.\n", inputBuffer);
+                            continue;
+                        }
+                        elfHeader = (ELFHeader*)buffer;
+                        if (elfHeader->class_ != 1) {
+                            printk("The file %s is not a 32-bit ELF file.\n", inputBuffer);
+                            continue;
+                        }
+                        context.size = sizeof(ELF32Header);
+                        if (!fat->StreamFile(packet, buffer, sizeof(ELF32Header), context)) {
+                            printk("3. Failed to read file %s.\n", inputBuffer);
+                            continue;
+                        }
+                        ELF32Header* elf32Header = (ELF32Header*)buffer;
+                        auto validationResult2 = ValidateELF32Header(*elf32Header, packet.size);
+                        if (validationResult2 != ElfLongHeaderValidationResult::Good) {
+                            printk("The file %s has an invalid ELF32 header.\n", inputBuffer);
+                            continue;
+                        }
+                        KernelLoadPoint = elf32Header->e_entry;
+                        context.offset = elf32Header->e_phoff;
+                        context.size = elf32Header->e_phnum * elf32Header->e_phentsize;
+                        uint16_t programHeaderCount = elf32Header->e_phnum;
+                        if (!fat->StreamFile(packet, buffer, context.size, context)) {
+                            printk("Failed to read program headers of %s.\n", inputBuffer);
+                            continue;
+                        }
+                        pheader32* programHeaders = (pheader32*)buffer;
+                        bool hasUnloadableSegment = false;
+                        for (uint16_t i = 0; i < programHeaderCount; i++) {
+                            auto validationResult3 = ValidateProgramHeader(programHeaders[i], packet.size);
+                            if (programHeaders[i].p_type != PT_LOAD) continue;
+                            if (validationResult3 != ProgramHeaderValidationResult::Good) {
+                                hasUnloadableSegment = true;
+                                break;
+                            }
+
+                            // todo: validate that the memory region isn't bad
+
+                        }
+                        if (hasUnloadableSegment) {
+                            printk("The file %s has an unloadable data segment in its program headers.\n", inputBuffer);
+                            continue;
+                        }
+
+                        if (ValidateProgramHeaderOverlap(programHeaders, programHeaderCount) != ProgramHeaderValidationResult::Good) {
+                            printk("The file %s has overlapping loadable segments in its program headers.\n", inputBuffer);
+                            continue;
+                        }
+
+                        for (uint16_t i = 0; i < programHeaderCount; i++) {
+                            if (programHeaders[i].p_type != PT_LOAD) continue;
+                            context.offset = programHeaders[i].p_offset;
+                            context.size = programHeaders[i].p_filesz;
+                            if (!fat->StreamFile(packet, (uint8_t*)programHeaders[i].p_paddr, context.size, context)) {
+                                printk("Failed to read segment %d of %s.\n", i, inputBuffer);
+                                hasUnloadableSegment = true;
+                                break;
+                            }
+                            if (programHeaders[i].p_memsz > programHeaders[i].p_filesz) {
+                                uint32_t bssSize = programHeaders[i].p_memsz - programHeaders[i].p_filesz;
+                                uint8_t* bssStart = (uint8_t*)(programHeaders[i].p_paddr + programHeaders[i].p_filesz);
+                                for (uint32_t j = 0; j < bssSize; j++) bssStart[j] = 0;
+                            }
+                        }
+
+                        printk("File read successfully.\n");
+                        ValidCommand = true;
                     }
                     else printk("Did not find %s\n", inputBuffer);
                 }
             }
+        }
 
-            printk("Read %s. Request understood and promptly ignored.\n", inputBuffer);
+        if (ValidCommand) {
+            for (uint16_t i = 0; i < 6; i++) {
+                printk("Booting %s in %d seconds...\n", inputBuffer, 5 - i);
+                if (i != 5) LiteralWait();
+            }
+            SBL_Region pmArea;
+            if (SBL_GetPMIVTGDTArea(ebx, pmArea) != SBLMapResult::Good) {
+                printk("Failed to get PM_IVT_GDT area from bootloader map.\n");
+                hang();
+            }
+            RunKernel(KernelLoadPoint, eax, ebx, (uint16_t)(pmArea.address));
+            printk("Failed to jump to kernel. This shouldn't appear.\n");
+            printk("Please report this to issue@harukimedia.org.\n");
+        }
+        else {
+            printk("Gave up, somehow.\n");
+            printk("You really shouldn't see this message.\nPlease report it to issue@harukimedia.org lmao.\n");
         }
 
 

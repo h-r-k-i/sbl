@@ -133,8 +133,8 @@ kernel.o: $(KERNEL_C)
 consoleio.o: ./boot/s3/drivers/consoleio.cpp
 	$(CC) $(CFLAGS) -c ./boot/s3/drivers/consoleio.cpp -o consoleio.o
 
-$(KERNEL_BIN): kernel.o
-	$(LD) $(KERNEL_LDFLAGS) -T $(KERNEL_LD) -Map=$(BUILD_BIN)/kernel.map -o $@ kernel.o
+$(KERNEL_BIN): kernel.o $(IK_OBJ)
+	$(LD) $(KERNEL_LDFLAGS) -T $(KERNEL_LD) -Map=$(BUILD_BIN)/kernel.map -o $@ $(IK_OBJ) kernel.o
 
 # $(OS_IMG): $(BOOT_BIN) $(KERNEL_BIN)
 # 	dd if=/dev/zero of=$(OS_IMG) bs=512 count=131072

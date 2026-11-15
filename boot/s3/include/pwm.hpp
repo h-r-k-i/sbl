@@ -13,5 +13,7 @@
  *******************************************************************************************/
 
 extern "C" void ShutDownPC();
+// Waits one second
+extern "C" void LiteralWait();
 
 #endif // PWM_HPP

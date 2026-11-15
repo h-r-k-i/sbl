@@ -16,7 +16,7 @@
 ; renamed arg_offset to match arg_segment
 %define arg_offset [bp + 0x06]
 
-global ShutDownPC
+global ShutDownPC, LiteralWait
 
 ; Returns if failed, otherwise does not return for... obvious reasons
 ShutDownPC:
@@ -78,6 +78,33 @@ ShutDownPC:
 
 
     .ShutDownPC_END:
+    pop si
+    pop ds
+    pop bx
+    pop di
+    pop es
+    pop bp
+    retf
+
+LiteralWait:
+    ; variables:
+    ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
+    ; [bp + 0x02]: return address (see warning above)
+
+    push bp
+    mov bp, sp
+    push es
+    push di
+    push bx
+    push ds
+    push si
+
+    xor al, al
+    mov ah, 0x86
+    mov cx, 0x000F
+    mov dx, 0x4240
+    int 0x15
+
     pop si
     pop ds
     pop bx
