@@ -57,17 +57,15 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
         printk("Please type the 8.3 directory of the kernel you want to boot,\n");
         printk("or enter Q to shut down the device.\n");
         printk("Do not enter drive letters.\n");
-        printk("Max length is 255 characters.");
+        printk("Max length is 255 characters.\n");
 
         bool ValidCommand = false;
 
         char inputBuffer[256] = {0};
-
         Disk disk(edx & 0xFF, globalResult_16);
-        // disk.GetSectors(0, 1, (void*)0x7000); // read the first sector of the disk into memory at 0x7000
+        uint32_t KernelLoadPont = 0x0000;
 
         while (!ValidCommand) {
-            printk("\n");
             printk("sbl.harukimedia.org# ");
 
             gets(inputBuffer, 256);
@@ -94,54 +92,31 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                 disk.GetSectors(a.StartLBA, 1, vbrSector);
                 VBR* vbr = (VBR*)(vbrSector);
                 uint8_t* buffer = (uint8_t*)0xF000;
-                if (vbr->GetFATType() == FATType::FAT12) {
-                    FAT12 fat12(disk, a.StartLBA);
-                    auto packet = fat12.ResolvePath(inputBuffer);
+
+                FAT12 fat12(disk, a.StartLBA);
+                FAT16 fat16(disk, a.StartLBA);
+                FAT32 fat32(disk, a.StartLBA);
+
+                FAT* fat = nullptr;
+
+                switch (vbr->GetFATType()) {
+                    case FATType::FAT12: fat = &fat12; break;
+                    case FATType::FAT16: fat = &fat16; break;
+                    case FATType::FAT32: fat = &fat32; break;
+                    default: break;
+                }
+                if (fat != nullptr) {
+                    auto packet = fat->ResolvePath(inputBuffer);
                     if (packet.directoryState == DirectoryState::Found) {
                         printk("Found %s.\n", inputBuffer);
-                        if (fat12.ReadFile(packet, buffer, packet.size)) {
+                        FileContext context = {0, 0x20};
+                        if (fat->ReadFile(packet, buffer, packet.size)) {
                             printk("File read successfully.\n");
                             ValidCommand = true;
                         }
                         else printk("Failed to read file %s.\n", inputBuffer);
                     }
-                    else {
-                        printk("Did not find %s\n", inputBuffer);
-                    }
-                }
-                if (vbr->GetFATType() == FATType::FAT16) {
-                    FAT16 fat16(disk, a.StartLBA);
-                    auto packet = fat16.ResolvePath(inputBuffer);
-                    if (packet.directoryState == DirectoryState::Found) {
-                        printk("Found %s.\n", inputBuffer);
-                        if (fat16.ReadFile(packet, buffer, packet.size)) {
-                            printk("File read successfully.\n");
-                            ValidCommand = true;
-                        }
-                        else {
-                            printk("Failed to read file.\n");
-                        }
-                    }
-                    else {
-                        printk("Did not find %s\n", inputBuffer);
-                    }
-                }
-                if (vbr->GetFATType() == FATType::FAT32) {
-                    FAT32 fat32(disk, a.StartLBA);
-                    auto packet = fat32.ResolvePath(inputBuffer);
-                    if (packet.directoryState == DirectoryState::Found) {
-                        printk("Found %s.\n", inputBuffer);
-                        if (fat32.ReadFile(packet, buffer, packet.size)) {
-                            printk("File read successfully.\n");
-                            ValidCommand = true;
-                        }
-                        else {
-                            printk("Failed to read file.\n");
-                        }
-                    }
-                    else {
-                        printk("Did not find %s\n", inputBuffer);
-                    }
+                    else printk("Did not find %s\n", inputBuffer);
                 }
             }
 

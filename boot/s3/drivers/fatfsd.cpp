@@ -102,6 +102,27 @@ DirectoryPacket FAT::WalkDirectory(const char* name, const uint8_t* sector) cons
     return packet; // not found. this shouldn't be reached normally although if the sector does not include all directory entries it's possible.
 }
 
+bool FAT::ValidClusterChain(DirectoryPacket dir) const {
+    uint32_t cluster = dir.cluster;
+    if (cluster == 0) {
+        if (!(dir.isDirectory && IsFAT32)) return dir.size == 0;
+        cluster = RootDirectoryCluster;
+    }
+
+    const uint32_t clusterBytes = (uint32_t)BytesPerSector * (uint32_t)SectorsPerCluster;
+    const uint32_t expected = dir.size / clusterBytes + (dir.size % clusterBytes != 0);
+    const uint32_t limit = dir.isDirectory ? ClusterCount : expected;
+
+    for (uint32_t n = 1; ; n++) {
+        if (cluster < 2 || cluster >= ClusterCount + 2) return false;
+        if (n > limit) return false;
+        uint32_t next = GetNextCluster(cluster);
+        if (IsBadCluster(next)) return false;
+        if (IsEndOfChain(next)) return dir.isDirectory || n == expected;
+        cluster = next;
+    } 
+}
+
 DirectoryPacket FAT::ResolvePath(const char* path) const {
     DirectoryPacket packet = {
         .cluster = 0,
@@ -143,6 +164,7 @@ DirectoryPacket FAT::ResolvePath(const char* path) const {
 
         // End of path
         if (path[pathPointer] == '\0') {
+            if (!ValidClusterChain(packet)) packet.directoryState = DirectoryState::Bad;
             return packet;
         }
 
@@ -152,7 +174,10 @@ DirectoryPacket FAT::ResolvePath(const char* path) const {
             return packet;
         }
         // Trailing slash
-        if (path[pathPointer + 1] == '\0') return packet;
+        if (path[pathPointer + 1] == '\0') {
+            if (!ValidClusterChain(packet)) packet.directoryState = DirectoryState::Bad;
+            return packet;
+        }
     }
 }
 
@@ -176,9 +201,60 @@ bool FAT::ReadFile(DirectoryPacket dir, uint8_t* buffer, size_t bufferSize) cons
             if (bytesRead >= dir.size) return true;
         }
         cluster = GetNextCluster(cluster);
+        if (IsBadCluster(cluster)) return false;
     }
 
     return bytesRead >= dir.size;
+}
+
+bool FAT::StreamFile(DirectoryPacket dir, uint8_t* buffer, size_t bufferSize, FileContext& context) const {
+    if (dir.directoryState != DirectoryState::Found) return false;
+    if (dir.isDirectory) return false;
+    if (dir.size == 0) return false;
+    if (context.size == 0) return true; // nothing to read soooo technically this is a success
+    if (dir.size > 0 && buffer == nullptr) return false;
+    if (bufferSize < context.size) return false; // buffer is not large enough to hold the requested data
+    if (context.offset >= dir.size) return false; // already at the end of the file
+    if (context.size > dir.size - context.offset) return false; // requested size exceeds the remaining file size
+
+    uint32_t bytesRead = 0;
+    uint32_t cluster = dir.cluster;
+    uint32_t clustersVisited = 0;
+    uint32_t clusterOffset = context.offset / ((uint32_t)BytesPerSector * (uint32_t)SectorsPerCluster);
+
+    // seek to the correct cluster based on the context offset
+    for (uint32_t i = 0; i < clusterOffset; i++) {
+        if (IsBadCluster(cluster)) return false; // bad cluster
+        if (IsEndOfChain(cluster) || cluster < 2 || cluster >= ClusterCount + 2) return false; // invalid cluster number
+        if (++clustersVisited > ClusterCount) return false; // prevent infinite loops in case of a corrupted FAT
+        cluster = GetNextCluster(cluster);
+    }
+    if (IsEndOfChain(cluster) || cluster < 2 || cluster >= ClusterCount + 2 || IsBadCluster(cluster)) return false; // invalid cluster number
+
+    const uint32_t clusterBytes = (uint32_t)BytesPerSector * (uint32_t)SectorsPerCluster;
+    uint32_t offsetInCluster = context.offset % clusterBytes;
+    uint32_t sectorIndex = offsetInCluster / BytesPerSector;
+    uint32_t offsetInSector = offsetInCluster % BytesPerSector;
+
+    while (bytesRead < context.size) {
+        if (disk.GetSectors(DataStartLBA + (cluster - 2) * SectorsPerCluster + sectorIndex, 1, sectorBuffer) != 0) return false;
+        uint32_t available = BytesPerSector - offsetInSector;
+        uint32_t remaining = context.size - bytesRead;
+        uint32_t n = available < remaining ? available : remaining;
+        for (uint32_t j = 0; j < n; j++) buffer[bytesRead + j] = sectorBuffer[offsetInSector + j];
+        bytesRead += n;
+        offsetInSector = 0;
+
+        if (bytesRead >= context.size) break;
+
+        if (++sectorIndex == SectorsPerCluster) {
+            sectorIndex = 0;
+            if (++clustersVisited > ClusterCount) return false;
+            cluster = GetNextCluster(cluster);
+            if (IsBadCluster(cluster) || IsEndOfChain(cluster) || cluster < 2 || cluster >= ClusterCount + 2) return false;
+        }
+    }
+    return true;
 }
 
 DirectoryPacket FAT::FindInDirectory(const char* name, DirectoryPacket dir) const {
@@ -222,6 +298,10 @@ DirectoryPacket FAT::FindInDirectory(const char* name, DirectoryPacket dir) cons
                 if (packet.directoryState != DirectoryState::NotFound) return packet;
             }
             cluster = GetNextCluster(cluster);
+            if (IsBadCluster(cluster)) {
+                packet.directoryState = DirectoryState::Bad;
+                return packet;
+            }
         }
     }
     return packet; // not found
@@ -276,7 +356,7 @@ uint32_t FAT12::GetNextCluster(uint32_t clusterNumber) const {
 }
 
 bool FAT12::IsEndOfChain(uint32_t cluster) const {
-    return cluster > 0xFEF;
+    return cluster >= 0xFF8;
 }
 
 bool FAT12::IsBadCluster(uint32_t cluster) const {
@@ -326,7 +406,7 @@ uint32_t FAT16::GetNextCluster(uint32_t clusterNumber) const {
 }
 
 bool FAT16::IsEndOfChain(uint32_t cluster) const {
-    return cluster > 0xFFEF;
+    return cluster >= 0xFFF8;
 }
 
 bool FAT16::IsBadCluster(uint32_t cluster) const {
@@ -390,7 +470,7 @@ uint32_t FAT32::GetNextCluster(uint32_t clusterNumber) const {
 }
 
 bool FAT32::IsEndOfChain(uint32_t cluster) const {
-    return cluster > 0x0FFFFFEF;
+    return cluster >= 0x0FFFFFF8;
 }
 
 bool FAT32::IsBadCluster(uint32_t cluster) const {

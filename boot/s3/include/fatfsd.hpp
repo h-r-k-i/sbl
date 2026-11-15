@@ -202,6 +202,11 @@ struct DirectoryPacket {
     DirectoryState directoryState; // whether the file was found or not. if false, the other fields are meaningless.
 };
 
+struct FileContext {
+    uint32_t offset;
+    uint32_t size;
+};
+
 class FAT {
     protected:
         Disk& disk;
@@ -247,6 +252,10 @@ class FAT {
         // or a NullPacket if the file or directory is not found.
         DirectoryPacket WalkDirectory(const char* name, const uint8_t* sector) const;
 
+        // Given a file represented as a DirectoryPacket, this function checks to see if the file
+        // has a cluster loop and is corrupted. Returns true if the file is valid, false if it is corrupted.
+        bool ValidClusterChain(DirectoryPacket dir) const;
+
         // Given a path, this function resolves it to a DirectoryPacket with the cluster number, size, and whether it's a directory,
         // or a NullPacket if the file or directory is not found.
         // Assumes the path is absolute.
@@ -254,6 +263,10 @@ class FAT {
 
         // Given a file represented as a DirectoryPacket, this function reads the file into a buffer. The buffer must be large enough to hold the entire file. 
         bool ReadFile(DirectoryPacket dir, uint8_t* buffer, size_t bufferSize) const;
+
+        // Given a file represented as a DirectoryPacket and a FileContext, this function reads the file into a buffer.
+        // The buffer must be large enough to hold the part of the file being read.
+        bool StreamFile(DirectoryPacket dir, uint8_t* buffer, size_t bufferSize, FileContext& context) const;
 
         // Given a cluster number, this function checks to see if the subdirectory has the requested file.
         // Returns a DirectoryPacket with the cluster number, size, and whether it's a directory,

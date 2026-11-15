@@ -15,6 +15,12 @@ CXXFLAGS = -ffreestanding -Wall -Wextra -fno-exceptions \
 		   -fno-pie -nostdlib -mno-red-zone
 LDFLAGS = -nostdlib --oformat binary
 
+KERNEL_CFLAGS = -ffreestanding -O2 -Wall -Wextra \
+		        -fno-stack-protector -fno-pie -fno-pic \
+				-m32 -mgeneral-regs-only -I./boot/s3/include -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include
+
+KERNEL_LDFLAGS = -m elf_i386 -nostdlib
+
 BUILD_BIN = build
 
 BOOT1_ASM = ./boot/s1.s
@@ -43,7 +49,7 @@ BOOT2_BIN = ./$(BUILD_BIN)/s2.bin
 BOOT3_BIN = ./$(BUILD_BIN)/s3.bin
 
 BOOT_BIN   = boot.bin
-KERNEL_BIN = kernel.bin
+KERNEL_BIN = kernel.elf
 OS_IMG     = os.img
 
 BOOT3_OBJ  = ./$(BUILD_BIN)/s3.o
@@ -56,11 +62,12 @@ BOOT3_LD = ./boot/s3/s3.ld
 BOOT3_DRVASM = $(wildcard ./boot/s3/drivers/*.s)
 BOOT3_DRVO = $(patsubst ./boot/s3/drivers/%.s,./$(BUILD_BIN)/%.o,$(BOOT3_DRVASM))
 
-INITKERNEL = ./bin/nekotest.s
+INITKERNEL = ./bin32/nekotest.s
 IK_OBJ = ./$(BUILD_BIN)/nekotest.o
 
-KERNEL = ./bin/neko.c
+KERNEL = ./bin32/neko.c
 KERNEL_OBJ = ./$(BUILD_BIN)/neko.o
+KERNEL_LD = ./bin32/neko.ld
 
 ifdef S2_DEBUG
     S2_DEBUG_FLAG := -D$(S2_DEBUG)
@@ -103,7 +110,7 @@ $(IK_OBJ): $(INITKERNEL)
 	nasm -f elf32 $< -o $@
 
 $(KERNEL_OBJ): $(KERNEL)
-	$(CC) -ffreestanding -m16 -I./boot/s3/include -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include -c $< -o $@
+	$(CC) -ffreestanding -I./boot/s3/include -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include -c $< -o $@
 
 ./$(BUILD_BIN)/s3.cpp.o: $(BOOT3_C)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -111,8 +118,8 @@ $(KERNEL_OBJ): $(KERNEL)
 ./$(BUILD_BIN)/%.cpp.o: ./boot/s3/drivers/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BOOT3_ELF): $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_LD) $(BOOT3_DRVO) $(IK_OBJ) $(KERNEL_OBJ)
-	$(LD) -m elf_i386 -T $(BOOT3_LD) -o $@ $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_DRVO) $(IK_OBJ) $(KERNEL_OBJ)
+$(BOOT3_ELF): $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_LD) $(BOOT3_DRVO)
+	$(LD) -m elf_i386 -T $(BOOT3_LD) -o $@ $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_DRVO)
 
 $(BOOT3_BIN): $(BOOT3_ELF)
 	$(OBJ) -O binary $< $@
@@ -121,13 +128,13 @@ $(BOOT_BIN): $(BOOT1_BIN) $(BOOT2_BIN) $(BOOT3_BIN)
 	cat $(BOOT1_BIN) $(BOOT2_BIN) $(BOOT3_BIN) > $(BOOT_BIN) 
 
 kernel.o: $(KERNEL_C)
-	$(CC) $(CFLAGS) -c $(KERNEL_C) -o kernel.o
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 
 consoleio.o: ./boot/s3/drivers/consoleio.cpp
 	$(CC) $(CFLAGS) -c ./boot/s3/drivers/consoleio.cpp -o consoleio.o
 
 $(KERNEL_BIN): kernel.o
-	$(LD) $(LDFLAGS) -Ttext 0x8000 kernel.o -o $(KERNEL_BIN)
+	$(LD) $(KERNEL_LDFLAGS) -T $(KERNEL_LD) -Map=$(BUILD_BIN)/kernel.map -o $@ kernel.o
 
 # $(OS_IMG): $(BOOT_BIN) $(KERNEL_BIN)
 # 	dd if=/dev/zero of=$(OS_IMG) bs=512 count=131072
@@ -139,7 +146,7 @@ $(KERNEL_BIN): kernel.o
 # 	mcopy -i $(OS_IMG)@@1048576 $(KERNEL_BIN) ::/BOOT/NEKO.ELF
 
 $(OS_IMG): $(BOOT_BIN) $(KERNEL_BIN)
-	dd if=/dev/zero of=$(OS_IMG) bs=512 count=1000000
+	dd if=/dev/zero of=$(OS_IMG) bs=1M count=512
 	printf 'label: dos\nstart=2048, type=c, bootable\n' | sfdisk $(OS_IMG)
 	mkfs.fat -F 32 -n "Neko" --offset=2048 $(OS_IMG)
 	dd if=$(BOOT_BIN) of=$(OS_IMG) bs=446 count=1 conv=notrunc
