@@ -9,7 +9,7 @@ This repository exists so SBL and Neko can exist in separate directories so Neko
 being a bootloader and I can decide to physically switch between working on SBL and working on Neko
 instead of being tempted to work on both.
 
-![](https://x.com/FrostBiteNerd/status/2123102686187004150/photo/1)
+![](https://pbs.twimg.com/media/HXbEZBzXUAA3pVr.jpg?name=medium)
 
 Let's pretend that we can ever be professional. SBL is a bootloader that does some GRUB-esque things and
 then loads a kernel with user input. For a project done by a college junior with no prior experience with
