@@ -174,7 +174,7 @@ check youtube maybe
 - [X] FAT32 and ELF reading
 - [ ] Bugfixes
 - [ ] More bugfixes
-- [ ] Getting that one part of the bootloader to actually load the VBE mode listed in the Arc-C map instead
+- [X] Getting that one part of the bootloader to actually load the VBE mode listed in the Arc-C map instead
       of basically going "lol figure it out yourself dumbass" and forcing the kernel to handle that itself
       (mind you 32-bit mode doesn't permit BIOS interrupts)
 - [ ] Fixing the slop.
@@ -218,6 +218,7 @@ Who do you think I am? Claude?
 │       │   ├── elf.cpp          # ELF loader
 │       │   ├── protected.s      # protected mode entry + jump to kernel
 │       │   ├── pwm.s            # shutdown + busy-wait
+│       │   ├── vmode.s          # display mode change
 │       │   └── io.s             # keyboard input + cursor control (BIOS)
 │       └── include/         #   headers, incl. sblheader.hpp (the Arc-C map format)
 └── LICENSE
