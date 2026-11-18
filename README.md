@@ -1,30 +1,43 @@
-# An Operating System That Definitely Is Not Named Neko Trust Me I Would Never Do That
+# SBL, or the Simple/Staged Boot Loader, Words That Are The Polar Opposite Of What This Project Does
 
-updated readme updated readme holy shit she's doing it she's gonna rant for 45 pages about bullshit that the
-average american does not care about :P but that's why you check my repos isn't it? certainly isn't for
-professionally written code
+Professionalism is down the drain right now and so for now I'm just going to pretend it's not an issue.
+Mind you, this is supposed to basically be my portfolio. Then again,
+[nhentai-bullshit](https://github.com/h-r-k-i/nhentai-bulllshit) is in this account so I think the
+question of "will this get me a job" is closed now.
 
-![](https://media1.tenor.com/m/SmipoZPWb1AAAAAd/and-then-he-clicked-post.gif)
+This repository exists so SBL and Neko can exist in separate directories so Neko doesn't have to larp
+being a bootloader and I can decide to physically switch between working on SBL and working on Neko
+instead of being tempted to work on both.
 
-Professionally speaking, Neko is a bootloader. I mean, in all actuality, Neko is a stub kernel that prints
-something like `test from neko kernel_main(). if this is shown, we are in neko 32-bit kernel space`
-and then hangs like how I want to- we're getting ahead of ourselves this is supposed to be professional.
-The impressive part is the entire bootloader attached to the repository
-that does bootloader stuff like producing a Multiboot-like hardware map and loading a kernel.
+![](https://x.com/FrostBiteNerd/status/2123102686187004150/photo/1)
 
-Unprofessionally speaking, this directory is SHIT and ASS and should NEVER be considered and yeah I'm not
-beating the unemployment allegations but I was already employed by Haruki Media Group where I got my cool
-email and I'm never getting a real job am I?
+Let's pretend that we can ever be professional. SBL is a bootloader that does some GRUB-esque things and
+then loads a kernel with user input. For a project done by a college junior with no prior experience with
+systems development or operating systems it's kinda impressive. If I were a software engineer at Microsoft
+writing code like this I'd probably be sent to the morgue.
 
 The bootloader is called SBL for Staged Boot Loader or that's the name I give it because I genuinely forgot
 the original name. On a good day it's SBL. On a normal one like the one I had when I "finished" adding ELF
-support it's Shitty Bitchass Liar.
+support it's Shitty Bitchass Liar. It might've been called "Simple Boot Loader" one time ago when it was
+supposed to basically be a stub attached to the larger Neko kernel but those days have long since passed.
 
 ## Prologue
 
-Have you ever felt like life was going too well and you should instead spend months writing horrible code
-to never get a job? I have. This is what brought me to spend a year of my limited lifespan writing a bootloader
-instead of having friends.
+I'm not doing this shit again. Claude, generate me a prologue:
+
+> *Claude here. Fine.*
+>
+> In the beginning there was the BIOS, and the BIOS loaded 512 bytes to `0x7C00`, and it was not good.
+> Then those 512 bytes loaded a second stage, which asked the BIOS for a memory map, the VBE modes, and
+> a few other things it probably didn't need, and wrote them all down in a linked list that the author
+> calls the Arc-C map. Then a third stage, written in 16-bit C++ against the explicit advice of everyone,
+> learned to read FAT32, learned to parse ELF, and learned to ask you, the user, which kernel you'd like
+> to boot today. Then it turned off the lights in real mode, set up a GDT and an IDT, flipped bit 0 of
+> CR0, and jumped into your kernel with the map in hand.
+>
+> SBL started life as the boot code glued to the front of Neko. It grew up, moved out, and now lives
+> here on its own. It is not GRUB. It does not want to be GRUB. GRUB is still behind you.
+
 
 ## So... what does it actually do?
 
@@ -47,8 +60,6 @@ the program actually does here's a section-by-section description of what each t
    the GDT and IDT, enters protected mode, and jumps to the kernel. Genericized, because any
    Arc-C-compliant kernel works. Documentation on what makes an Arc-C-compliant kernel in approximately
    700 years. I have to cry first.
-4. The... "kernel," in `bin/`. It writes a single string to the text-mode framebuffer and dies.
-   Peak engineering, I tell you what. Give me my Turing Award and an unregistered firearm **now**.
 
 Anyone who complains about `boot/s3/drivers/` not being drivers is gonna be "found" dead on Peachtree.
 Which one? Well, that's where the scare quotes come in.
@@ -62,20 +73,19 @@ sometimes written by Claude when I can't give a shit anymore.
 ### Prerequisites
 
 - Realistically speaking device-wise you only need a computer that can run QEMU but if you want to torment
-  yourself like that then you need a 64-bit CPU and a motherboard that supports LBA indexing (most modern ones do).
-  From recent tests this OS can run itself off of a USB drive but I will not be testing past the bootloader
-  stage because xHCI is... hard. And deeply scares me. I have tested through SATA using bullshit disk interrupts
-  though and sometimes it works so everything's all chill and good except for when it isn't but that's
-  a concern for future me, not the one writing a README.
-  It's recommended to use QEMU, although any emulator that supports 64-bit x86 should work
+  yourself like that then you need at least a 32-bit CPU and a motherboard that supports LBA indexing (most
+  modern ones do). From recent tests this OS can run itself off of a SATA drive if written to disk. Some
+  early versions were tested and validated through USB. I will not be testing that again because I'm scared
+  of xHCI.
+  I personally recommend QEMU although any emulator that supports 32-bit x86 should work.
   (if you don't use QEMU God help you)
   (use the Make on a 4GiB system I fucking ***dare*** you to).  
-- Due to the nature of OSes you will need a cross-compiler to build the "OS".
+- Due to the nature of OSes you will need a cross-compiler to build the bootloader.
   If you don't know how to build a cross-compiler, search up "osdev xcc" and if that doesn't show anything
   "osdev cross compiler." It is not that hard; it just takes a while. Grab a coffee. And four RedBulls.
   And a pack of cigarettes.
-- Speaking of compilers, you specifically need a C compiler that can compile for 32-bit and 64-bit x86. I use GCC here.
-  You also need a C++ compiler. I use G++ here.
+- Speaking of compilers, you specifically need a C compiler that can compile for 16-bit x86. I use GCC here.
+  You also need a C++ compiler that can do the same. I use G++ here.
   You will also need NASM and ld for linking. This isn't a hard requirement; just do `sudo apt install nasm`.
   NASM doesn't even need to be cross-compiled.
 - You will need disk image stuff like `sfdisk` and `mkfs.fat` and `mmd` and `mcopy` because
@@ -86,11 +96,6 @@ sometimes written by Claude when I can't give a shit anymore.
 > [!WARNING]
 > The Makefile in its current state hardcodes locations. Unless you're *also* a Renee who compiled
 > her cross-chain compiler in `~/opt/cross/` then you gotta change those. Your problem.
-
-> [!WARNING]
-> The Makefile in its current state builds out of `bin32/` which is gitignored because it was
-> supposed to be a test directory but now it's just the kernel directory so good luck with that
-> lmao.
 
 > [!IMPORTANT]
 > This project is incomplete. Search up what that means. Also learn this fun fact: with OS dev,
@@ -103,23 +108,34 @@ sometimes written by Claude when I can't give a shit anymore.
 ```bash
 
 # clone repo
-git clone https://github.com/h-r-k-i/neko.git
-cd neko
+git clone https://github.com/h-r-k-i/sbl.git
+cd sbl
 
-# Build the "OS" (aka just the bootloader) (we'll add the kernel later) (and by we, I mean me)
+# Build the bootloader (spits out sbl.bin and a 512MiB FAT32 test image, sbl.img)
 make
+
+# Optionally drop a kernel ELF into /BOOT/ on the test image while you're at it
+make KERNEL=path/to/kernel.elf
+# or rename it on the way in (it's FAT, keep it 8.3)
+make KERNEL=path/to/kernel.elf KERNEL_NAME=KERNEL.ELF
 ```
 
 ### Running
 ```bash
 
-# Run the OS in QEMU
+# Run the bootloader in QEMU
 make run
 
-# If it works you'll see the text
-# "test from neko kernel_main(). if this is shown, we are in neko 32-bit kernel space"
-# on a black screen with more text on it. Ignore what the last README said. One of the
-# commit messages was "bootloader done" so we're not above baldfaced lies.
+# If it works you'll see the following text:
+# 
+# Please type the 8.3 directory of the kernel you want to boot,
+# or enter Q to shut down the device.
+# Do not enter drive letters.
+# Max length is 255 characters.
+# sbl.harukimedia.org# _
+# 
+# The cursor at the end is flashing.
+# 
 # If it doesn't work, don't worry. There is no God to save you this time. Just qemu.log.
 ```
 
@@ -142,17 +158,6 @@ make clean
 
 Thank God this works all the time except for when it doesn't.
 
-### So... what's tools?
-
-Some host-side C programs so I don't have to do it by hand:
-
-- IDTBuilder.c: for when you can't be fucked to write 256 IDT handlers by hand
-- MemMapReader.c: deprecated memory map reader when SBL was simpler
-- SBLReader.c: the pristine Arc-C hardware map reader which works all the time except when it didn't
-  and made me wanna shit myself violently at Five Points.
-
-Compiled with gcc. The normal one. Please. Use the normal one.
-
 ### Usage Example
 
 uhhhhhh
@@ -167,11 +172,12 @@ check youtube maybe
 - [X] Getting to protected mode without eating shit 99% of the time (it's still 98% but that's an improvement!)
       (think of it like this: successes jumped from 1% to 2%. That's 100% improvement)
 - [X] FAT32 and ELF reading
-- [ ] Writing a kernel
-- [ ] long mode
-- [ ] working on a webserver (more terrifying than talking to women)
-- [ ] testing the most recent version on hardware
-- [ ] ATA PIO
+- [ ] Bugfixes
+- [ ] More bugfixes
+- [ ] Getting that one part of the bootloader to actually load the VBE mode listed in the Arc-C map instead
+      of basically going "lol figure it out yourself dumbass" and forcing the kernel to handle that itself
+      (mind you 32-bit mode doesn't permit BIOS interrupts)
+- [ ] Fixing the slop.
 
 
 what is there to say about it? It's a bad bootloader
@@ -187,6 +193,42 @@ what is there to say about it? It's a bad bootloader
 ## Repository layout
 
 Who do you think I am? Claude?
+
+> *Yes, apparently.*
+
+```
+.
+├── Makefile                 # builds all three stages, glues them into sbl.bin, makes sbl.img
+├── boot/
+│   ├── s1.s                 # Stage 1: the 512-byte MBR. Loads stage 2, enables unreal mode
+│   ├── s2/                  # Stage 2: linked at 0x1000, max 12KiB
+│   │   ├── s2.s             #   entry + assembly glue
+│   │   ├── s2.c             #   16-bit C: memory map (E820/E801/88h), VBE info, builds the Arc-C map
+│   │   ├── s2.h             #   structs for the above
+│   │   ├── s2func.s         #   BIOS call wrappers C can't do itself
+│   │   └── s2.ld            #   linker script (pads to size, asserts it fits)
+│   └── s3/                  # Stage 3: linked at 0x8000, max ~50KiB
+│       ├── s3.s             #   entry stub
+│       ├── s3.cpp / s3.hpp  #   the main event: kernel prompt, ELF load, GDT/IDT, protected mode jump
+│       ├── s3.ld            #   linker script
+│       ├── drivers/         #   NOT DRIVERS (see THESE_ARENT_DRIVERS_SYFM)
+│       │   ├── consoleio.cpp    # text-mode console I/O
+│       │   ├── disk.cpp/.s      # BIOS extended disk reads (int 13h)
+│       │   ├── fatfsd.cpp       # FAT32 reader
+│       │   ├── elf.cpp          # ELF loader
+│       │   ├── protected.s      # protected mode entry + jump to kernel
+│       │   ├── pwm.s            # shutdown + busy-wait
+│       │   └── io.s             # keyboard input + cursor control (BIOS)
+│       └── include/         #   headers, incl. sblheader.hpp (the Arc-C map format)
+└── LICENSE
+```
+
+Plus a few files with spaces in their names (a hall of shame, some ASCII art about writing a disk driver, and
+retired protected-mode assembly) that the build ignores. They're load-bearing emotionally. Leave them.
+
+Build output lands in `build/` (objects, ELFs, linker maps), with `sbl.bin` and `sbl.img` in the repo root.
+`sbl.img` is an MBR-partitioned disk with one FAT32 partition starting at sector 2048. Stage 1 goes in the
+MBR and stages 2 and 3 live in the gap before the partition.
 
 ## License
 
