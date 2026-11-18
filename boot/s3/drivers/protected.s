@@ -61,7 +61,7 @@ RunKernel:
     pop di
     pop es
     pop bp
-    retf
+    o32 ret
 
 [bits 32]
 RunKernel_protected:
@@ -71,7 +71,6 @@ RunKernel_protected:
     mov es, ax
     mov fs, ax
     mov gs, ax
-    o32 lidt [eax]
     in al, 0x70
     and al, 0x7F
     out 0x70, al

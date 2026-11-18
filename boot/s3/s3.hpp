@@ -21,7 +21,7 @@
 #include "consoleio.hpp"
 
 // SeaBIOS Characters; these may not work on other BIOSes but whatever
-#define NULL         0x00
+#define NULLCHAR     0x00
 #define WHITE_SMILE  0x01
 #define BLACK_SMILE  0x02
 #define HEART        0x03
@@ -271,7 +271,7 @@
 #define THETA     0xE9
 #define OMEGA     0xEA
 #define DELTA     0xEB // WARN: LOWERCASE DELTA, NOT UPPERCASE
-#define INFINITY  0xEC
+#define INFINITE  0xEC
 #define LOW_PHI   0xED
 #define EPSILON   0xEE
 #define INTERSECT 0xEF // calc ii and phys ii and now discrete math and statistics i cant fucking escape

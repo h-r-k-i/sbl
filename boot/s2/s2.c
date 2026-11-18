@@ -503,6 +503,10 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
         }
     }
     VBEInfoBlock vbe = {0};
+    vbe.Signature[0] = 'V';
+    vbe.Signature[1] = 'B';
+    vbe.Signature[2] = 'E';
+    vbe.Signature[3] = '2';
     rest = PopulateVBEInfo(((uint32_t)&vbe >> 4) << 16 | ((uint32_t)&vbe & 0xF)); // awful
     int nodeSize = sizeof(SBL_DisplayInfoBlock);
     if (((rest & 0xFF00) == 0) && (rest & 0xFF) == 0x4F) {
@@ -551,16 +555,16 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
         nodeSize += sizeof(VBEInfoBlock) + dib->count * sizeof(VBEModeInfoBlock);
     }
     else {
-        stupidHeaderIPutHereForEase:
-            bootloader_header->flags &= ~(1ULL << 17);
-            bootloader_header->sgalf |= 1ULL << 17;
-            SBL_NodeMap->data = 0x0000;
-            tempBMM.VBEMIB.location = 0;
-            tempBMM.VBEMIB.size = 0;
-            tempBMM.DisplayInfoBlock.location = 0;
-            tempBMM.DisplayInfoBlock.size = 0;
+        bootloader_header->flags &= ~(1ULL << 17);
+        bootloader_header->sgalf |= 1ULL << 17;
+        SBL_NodeMap->data = 0x0000;
+        tempBMM.VBEMIB.location = 0;
+        tempBMM.VBEMIB.size = 0;
+        tempBMM.DisplayInfoBlock.location = 0;
+        tempBMM.DisplayInfoBlock.size = 0;
+        nodeSize += sizeof(SBL_Node);
     }
-    SBL_NodeMap->next = SBL_NodeMap->data + nodeSize;
+    SBL_NodeMap->next = (uint16_t)(SBL_NodeMap + 1) + nodeSize;
 
 
     // Build bootloader map info

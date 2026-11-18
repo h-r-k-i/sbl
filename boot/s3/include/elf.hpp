@@ -107,14 +107,14 @@ struct pheader64 {
 } __attribute__((packed));
 
 struct SBLHeader {
-    uint8_t magic[8]; // "NEKONEK0"
+    uint8_t magic[8]; // "NEKONEKO"
     uint16_t major; // contract year
     uint16_t minor; // contract month
     uint32_t size; // header size
     uint64_t flags; // flags for SBL
     uint64_t stack; // stack size
     uint8_t padding[24]; // zeroed out
-    uint64_t checksum; // crc32 checksum of the header
+    uint64_t checksum; // crc64 checksum of the header
 
 } __attribute__((packed));
 

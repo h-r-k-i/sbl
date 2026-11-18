@@ -116,7 +116,7 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                             printk("The file %s is a directory, not a file.\n", inputBuffer);
                             continue;
                         }
-                        if (packet.size < sizeof(ELFHeader) && packet.size < sizeof(SBLHeader)) {
+                        if (packet.size < sizeof(ELFHeader) || packet.size < sizeof(SBLHeader)) {
                             printk("What the fuck are you presenting to me?\n");
                             continue;
                         }
@@ -202,6 +202,10 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                             }
 
                             // todo: validate that the memory region isn't bad
+                            if (programHeaders[i].p_paddr < 0x100000) {
+                                hasUnloadableSegment = true;
+                                break;
+                            }
 
                         }
                         if (hasUnloadableSegment) {
@@ -229,9 +233,14 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                                 for (uint32_t j = 0; j < bssSize; j++) bssStart[j] = 0;
                             }
                         }
+                        if (hasUnloadableSegment) {
+                            printk("Failed to load all segments of %s.\n", inputBuffer);
+                            continue;
+                        }
 
                         printk("File read successfully.\n");
                         ValidCommand = true;
+                        break;
                     }
                     else printk("Did not find %s\n", inputBuffer);
                 }

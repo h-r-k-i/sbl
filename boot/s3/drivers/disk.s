@@ -38,7 +38,9 @@ GetDriveParameters:
     mov si, arg_offset
     mov dl, [bp + 0x0A] ; drive number
     mov ah, 0x48
+    sti
     int 0x13
+    cli
 
     mov al, ah
     xor ah, ah
@@ -49,7 +51,7 @@ GetDriveParameters:
     pop di
     pop es
     pop bp
-    retf
+    o32 ret
 
 GetSector:
     ; variables:
@@ -71,7 +73,9 @@ GetSector:
     mov si, arg_offset
     mov dl, [bp + 0x0A] ; drive number
     mov ah, 0x42
+    sti
     int 0x13
+    cli
 
     mov al, ah
     xor ah, ah
@@ -83,4 +87,4 @@ GetSector:
         pop di
         pop es
         pop bp
-        retf ; could've just done rets everywhere else this is stupid
+        o32 ret ; could've just done rets everywhere else this is stupid
