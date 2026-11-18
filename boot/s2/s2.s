@@ -72,9 +72,8 @@ start:
     xor bx, bx
     xor cx, cx
     xor dh, dh
-    mov si, 0x6FFF
+    mov si, 0x7000
     xor di, di
-    xor bp, ax
 
     mov ds, ax
     mov es, ax
@@ -82,7 +81,6 @@ start:
     mov gs, ax
 
     mov ss, ax
-    mov sp, 0x6FFF
     sti
 
     ; confirm for the user that we're in S2
@@ -112,14 +110,15 @@ start:
 
 stage0_1:
     ; S1: Build the SBL Data structure
-
+    sti
     cpush ImpAreaSize
     cpush ImpArea
     cpush SBL_Data
     ccall sbl_build
-    add sp, 4
+    add sp, 12
     cmp ax, 177
     je hang4 ; if 177 is returned then the SBL build succeeded BUT we're in debug mode so the bootloader will halt to allow map validation
+    cli
 
 
 ; S3: Read kernel from disk to lower memory.
@@ -399,13 +398,15 @@ m12l equ $ - m12
 DAP_S3:
     db 0x10         ; Size of DAP
     db 0            ; Reserved
-    dw s3_sectors   ; Sectors to read; hardcoded to 48 for now
-    dw s3_loc       ; Offset to load to
-    dw 0x0000       ; Segment to load to
+    dw s3_sectors   ; Sectors to read; hardcoded for now
+    dw s3_off       ; Offset to load to
+    dw s3_seg       ; Segment to load to
     dq 25           ; Starting LBA sector (zero-based)
 
 SBL_Data equ 0x5000
 
+s3_off equ 0x0000
+s3_seg equ 0x0800
 s3_loc equ 0x8000
 s3_sectors equ 78
 

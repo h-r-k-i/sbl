@@ -35,6 +35,7 @@ ShutDownPC:
     ; installation check
     mov ax, 0x5300
     xor bx, bx
+    sti
     int 0x15
     jc .ShutDownPC_END
     cmp bx, 0x504D
@@ -74,6 +75,7 @@ ShutDownPC:
     mov bx, 0x0001
     mov cx, 0x0003
     int 0x15
+    cli
     ; if we're still here... idfk
 
 
@@ -84,7 +86,7 @@ ShutDownPC:
     pop di
     pop es
     pop bp
-    retf
+    o32 ret
 
 LiteralWait:
     ; variables:
@@ -103,7 +105,9 @@ LiteralWait:
     mov ah, 0x86
     mov cx, 0x000F
     mov dx, 0x4240
+    sti
     int 0x15
+    cli
 
     pop si
     pop ds
@@ -111,4 +115,4 @@ LiteralWait:
     pop di
     pop es
     pop bp
-    retf
+    o32 ret

@@ -31,7 +31,6 @@ CPUID_RAND_EXT equ 1 << 30
 
 SBL_E820:
     ; mov ax, 0xFFFF
-    ; retf
     ; variables:
     ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
     ; [bp + 0x02]: return address (see warning above)
@@ -43,7 +42,7 @@ SBL_E820:
     mov bp, sp
     push es
     push di
-    push bx
+    o32 push ebx
     
     o32 mov ebx, continuation_pointer ; reference continuation pointer
     o32 mov ebx, [ebx] ; and then dereference the pointer
@@ -94,15 +93,14 @@ SBL_E820:
         jmp .SBL_E820_END
     
     .SBL_E820_END:
-        pop bx
+        o32 pop ebx
         pop di
         pop es
         pop bp
-        retf ; could've just done rets everywhere else this is stupid
+        o32 ret ; could've just done rets everywhere else this is stupid
 
 SBL_E801:
     ; mov ax, 0xFFFF
-    ; retf
     ; variables:
     ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
     ; [bp + 0x02]: return address (see warning above)
@@ -148,11 +146,10 @@ SBL_E801:
         pop di
         pop es
         pop bp
-        retf
+        o32 ret
 
 SBL_88:
     ; mov ax, 0xFFFF
-    ; retf
     ; variables:
     ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
     ; [bp + 0x02]: return address (see warning above)
@@ -189,7 +186,7 @@ SBL_88:
         pop di
         pop es
         pop bp
-        retf
+        o32 ret
 
 
 SBL_LM_Entropy:
@@ -197,7 +194,7 @@ SBL_LM_Entropy:
     mov bp, sp
     push es
     push di
-    push bx
+    o32 push ebx
 
     .SBL_LM_ENTROPY_CHECK_CPUID:
         o32 pushfd
@@ -262,15 +259,14 @@ SBL_LM_Entropy:
         jmp .SBL_LM_ENTROPY_END
 
     .SBL_LM_ENTROPY_END:
-        pop bx
+        o32 pop ebx
         pop di
         pop es
         pop bp
-        retf
+        o32 ret
 
 PopulateVBEInfo:
     ; mov ax, 0xFFFF
-    ; retf
     ; variables:
     ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
     ; [bp + 0x02]: return address (see warning above)
@@ -296,11 +292,10 @@ PopulateVBEInfo:
         pop di
         pop es
         pop bp
-        retf
+        o32 ret
 
 PopulateVBEMode:
     ; mov ax, 0xFFFF
-    ; retf
     ; variables:
     ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
     ; [bp + 0x02]: return address (see warning above)
@@ -329,11 +324,10 @@ PopulateVBEMode:
         pop di
         pop es
         pop bp
-        retf
+        o32 ret
 
 PopulateEDID:
     ; mov ax, 0xFFFF
-    ; retf
     ; variables:
     ; [bp + 0x00]: original base pointer (NOT A VARIABLE DO NOT FUCKING USE)
     ; [bp + 0x02]: return address (see warning above)
@@ -398,7 +392,7 @@ PopulateEDID:
         pop di
         pop es
         pop bp
-        retf
+        o32 ret
 
 GetDriveParameters:
     ; variables:
@@ -431,7 +425,7 @@ GetDriveParameters:
     pop di
     pop es
     pop bp
-    retf
+    o32 ret
 
 GetSector:
     ; variables:
@@ -465,4 +459,4 @@ GetSector:
         pop di
         pop es
         pop bp
-        retf ; could've just done rets everywhere else this is stupid
+        o32 ret ; could've just done rets everywhere else this is stupid

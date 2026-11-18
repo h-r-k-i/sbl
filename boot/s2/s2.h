@@ -41,8 +41,8 @@
 #define SBL_BOOTLOADER_CRITICAL 4
 
 /// quick defines
-#define FALSE 1 < 0
-#define TRUE 1 > 0
+#define FALSE (1 < 0)
+#define TRUE (1 > 0)
 
 
 /// Structures

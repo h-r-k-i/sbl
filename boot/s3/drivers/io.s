@@ -26,9 +26,11 @@ GetKeyboardInput:
     ; this function is actually really simple lmao
     ; Get input character
     xor ax, ax
+    sti
     int 0x16
+    cli
     xor ah, ah
-    retf
+    o32 ret
 
 EnableCursor:
     xor ax, ax
@@ -36,16 +38,20 @@ EnableCursor:
     xor cx, cx
     mov ch, 0b11001110
     mov cl, 0x0F
+    sti
     int 0x10
-    retf
+    cli
+    o32 ret
 
 DisableCursor:
     xor ax, ax
     mov ah, 0x01
     xor cx, cx
     mov ch, 0b00100000
+    sti
     int 0x10
-    retf
+    cli
+    o32 ret
 
 SetCursorPosition:
     ; variables:
@@ -67,7 +73,9 @@ SetCursorPosition:
     mov dh, [bp + 0x06] ; y coordinate
     mov dl, [bp + 0x08] ; x coordinate
     xor bx, bx
+    sti
     int 0x10
+    cli
 
     pop si
     pop ds
@@ -75,4 +83,4 @@ SetCursorPosition:
     pop di
     pop es
     pop bp
-    retf
+    o32 ret
