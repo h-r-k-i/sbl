@@ -123,6 +123,10 @@ struct VBR {
     } __attribute__((packed)) ebr;
 
     FATType GetFATType() const {
+        // check divisors before using them; a zero here would #DE (and hang in real mode)
+        if (bpb.SectorSize == 0 || bpb.SectorsPerCluster == 0)
+            return FATType::Unknown; // Technically if SectorSize is 0 the volume could be ExFAT but we don't support ExFAT
+
         const uint32_t totalSectors =
             bpb.TotalSectors16 != 0
                 ? bpb.TotalSectors16
@@ -143,10 +147,8 @@ struct VBR {
             + static_cast<uint64_t>(bpb.FATCount) * fatSectors
             + rootDirSectors;
 
-        if (bpb.SectorSize == 0 ||
-            bpb.SectorsPerCluster == 0 ||
-            overhead >= totalSectors)
-            return FATType::Unknown; // Technically if SectorSize is 0 the volume could be ExFAT but we don't support ExFAT
+        if (overhead >= totalSectors)
+            return FATType::Unknown;
 
         const uint32_t dataSectors =
             totalSectors - static_cast<uint32_t>(overhead);
@@ -211,20 +213,20 @@ class FAT {
     protected:
         Disk& disk;
         uint32_t PartitionLBA;
-        uint32_t FATStartLBA;
-        uint32_t RootDirectoryLBA;
-        uint32_t DataStartLBA;
+        uint32_t FATStartLBA = 0;
+        uint32_t RootDirectoryLBA = 0;
+        uint32_t DataStartLBA = 0;
 
-        uint16_t BytesPerSector = 0;
-        uint8_t  SectorsPerCluster;
+        uint16_t BytesPerSector = 0; // 0 = volume invalid / not parsed (see IsValid)
+        uint8_t  SectorsPerCluster = 0;
 
-        uint16_t RootEntryCount;
-        uint32_t SectorsPerFAT;
+        uint16_t RootEntryCount = 0;
+        uint32_t SectorsPerFAT = 0;
 
-        uint32_t RootDirectorySectors;
-        uint32_t ClusterCount;
+        uint32_t RootDirectorySectors = 0;
+        uint32_t ClusterCount = 0;
 
-        uint32_t RootDirectoryCluster; // for FAT32, the root directory is a cluster chain rather than a fixed location
+        uint32_t RootDirectoryCluster = 0; // for FAT32, the root directory is a cluster chain rather than a fixed location
 
         bool IsFAT32 = false;
 
@@ -235,6 +237,9 @@ class FAT {
     public:
         FAT(const FAT&) = delete; // prevent copy constructor
         FAT& operator=(const FAT&) = delete; // prevent assignment operator
+
+        // False if the constructor couldn't read or validate the volume. Nothing else may be called then.
+        bool IsValid() const { return BytesPerSector != 0 && SectorsPerCluster != 0; }
 
         virtual ClusterPacket GetFATEntryLocation(uint32_t clusterNumber) const = 0; // FAT-dependent implementation
         virtual uint32_t GetNextCluster(uint32_t clusterNumber) const = 0; // FAT-dependent implementation

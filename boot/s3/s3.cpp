@@ -66,6 +66,10 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
 
         char inputBuffer[256] = {0};
         Disk disk(edx & 0xFF, globalResult_16);
+        if (globalResult_16 != 0) {
+            printk("Failed to get boot drive parameters (error %x).\n", globalResult_16);
+            hang();
+        }
         uint32_t KernelLoadPoint = 0x0000;
 
         while (!ValidCommand) {
@@ -81,8 +85,15 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                 hang();
             }
             uint8_t sector[512];
-            disk.GetSectors(0, 1, sector);
+            if (disk.GetSectors(0, 1, sector) != 0) {
+                printk("Failed to read the partition table.\n");
+                continue;
+            }
             MBR* mbr = (MBR*)(sector);
+            if (mbr->BootSignature[0] != 0x55 || mbr->BootSignature[1] != 0xAA) {
+                printk("The boot drive has no valid MBR.\n");
+                continue;
+            }
 
             for (auto a : mbr->Partitions) {
                 if (a.isValid() == false) continue;
@@ -92,7 +103,7 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                 }
 
                 uint8_t vbrSector[512];
-                disk.GetSectors(a.StartLBA, 1, vbrSector);
+                if (disk.GetSectors(a.StartLBA, 1, vbrSector) != 0) continue;
                 VBR* vbr = (VBR*)(vbrSector);
                 uint8_t* buffer = (uint8_t*)0x6000;
 
@@ -108,6 +119,8 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                     case FATType::FAT32: fat = &fat32; break;
                     default: break;
                 }
+                // the FAT constructors flag a volume they couldn't parse by zeroing BytesPerSector
+                if (fat != nullptr && !fat->IsValid()) fat = nullptr;
                 if (fat != nullptr) {
                     auto packet = fat->ResolvePath(inputBuffer);
                     if (packet.directoryState == DirectoryState::Found) {
@@ -156,7 +169,8 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                             printk("The file %s does not follow the Arc-C contract.\n", inputBuffer);
                             continue;
                         }
-                        if ((~(((SBL_Data*)ebx)->flags | ((SBL_Data*)ebx)->sgalf) & sblHeader->flags) != 0) {
+                        // only bits in `flags` mean "present"; sgalf marks failures and must not count as support
+                        if ((~((SBL_Data*)ebx)->flags & sblHeader->flags) != 0) {
                             printk("This bootloader does not support the flags of %s.\n", inputBuffer);
                             continue;
                         }
