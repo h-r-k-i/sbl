@@ -25,6 +25,18 @@ supposed to basically be a stub attached to the larger Neko kernel but those day
 
 I'm not doing this shit again. Claude, generate me a prologue:
 
+> *Claude here. Fine.*
+>
+> In the beginning there was the BIOS, and the BIOS loaded 512 bytes to `0x7C00`, and it was not good.
+> Then those 512 bytes loaded a second stage, which asked the BIOS for a memory map, the VBE modes, and
+> a few other things it probably didn't need, and wrote them all down in a linked list that the author
+> calls the Arc-C map. Then a third stage, written in 16-bit C++ against the explicit advice of everyone,
+> learned to read FAT32, learned to parse ELF, and learned to ask you, the user, which kernel you'd like
+> to boot today. Then it turned off the lights in real mode, set up a GDT and an IDT, flipped bit 0 of
+> CR0, and jumped into your kernel with the map in hand.
+>
+> SBL started life as the boot code glued to the front of Neko. It grew up, moved out, and now lives
+> here on its own. It is not GRUB. It does not want to be GRUB. GRUB is still behind you.
 
 
 ## So... what does it actually do?
@@ -97,10 +109,15 @@ sometimes written by Claude when I can't give a shit anymore.
 
 # clone repo
 git clone https://github.com/h-r-k-i/sbl.git
-cd neko
+cd sbl
 
-# Build the bootloader
+# Build the bootloader (spits out sbl.bin and a 512MiB FAT32 test image, sbl.img)
 make
+
+# Optionally drop a kernel ELF into /BOOT/ on the test image while you're at it
+make KERNEL=path/to/kernel.elf
+# or rename it on the way in (it's FAT, keep it 8.3)
+make KERNEL=path/to/kernel.elf KERNEL_NAME=KERNEL.ELF
 ```
 
 ### Running
@@ -176,6 +193,42 @@ what is there to say about it? It's a bad bootloader
 ## Repository layout
 
 Who do you think I am? Claude?
+
+> *Yes, apparently.*
+
+```
+.
+├── Makefile                 # builds all three stages, glues them into sbl.bin, makes sbl.img
+├── boot/
+│   ├── s1.s                 # Stage 1: the 512-byte MBR. Loads stage 2, enables unreal mode
+│   ├── s2/                  # Stage 2: linked at 0x1000, max 12KiB
+│   │   ├── s2.s             #   entry + assembly glue
+│   │   ├── s2.c             #   16-bit C: memory map (E820/E801/88h), VBE info, builds the Arc-C map
+│   │   ├── s2.h             #   structs for the above
+│   │   ├── s2func.s         #   BIOS call wrappers C can't do itself
+│   │   └── s2.ld            #   linker script (pads to size, asserts it fits)
+│   └── s3/                  # Stage 3: linked at 0x8000, max ~50KiB
+│       ├── s3.s             #   entry stub
+│       ├── s3.cpp / s3.hpp  #   the main event: kernel prompt, ELF load, GDT/IDT, protected mode jump
+│       ├── s3.ld            #   linker script
+│       ├── drivers/         #   NOT DRIVERS (see THESE_ARENT_DRIVERS_SYFM)
+│       │   ├── consoleio.cpp    # text-mode console I/O
+│       │   ├── disk.cpp/.s      # BIOS extended disk reads (int 13h)
+│       │   ├── fatfsd.cpp       # FAT32 reader
+│       │   ├── elf.cpp          # ELF loader
+│       │   ├── protected.s      # protected mode entry + jump to kernel
+│       │   ├── pwm.s            # shutdown + busy-wait
+│       │   └── io.s             # keyboard input + cursor control (BIOS)
+│       └── include/         #   headers, incl. sblheader.hpp (the Arc-C map format)
+└── LICENSE
+```
+
+Plus a few files with spaces in their names (a hall of shame, some ASCII art about writing a disk driver, and
+retired protected-mode assembly) that the build ignores. They're load-bearing emotionally. Leave them.
+
+Build output lands in `build/` (objects, ELFs, linker maps), with `sbl.bin` and `sbl.img` in the repo root.
+`sbl.img` is an MBR-partitioned disk with one FAT32 partition starting at sector 2048. Stage 1 goes in the
+MBR and stages 2 and 3 live in the gap before the partition.
 
 ## License
 
