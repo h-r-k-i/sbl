@@ -111,13 +111,15 @@ start:
 stage0_1:
     ; S1: Build the SBL Data structure
     sti
+    cpush s3_sectors
     cpush ImpAreaSize
     cpush ImpArea
     cpush SBL_Data
     ccall sbl_build
-    add sp, 12
+    add sp, 16
     cmp ax, 177
     je hang4 ; if 177 is returned then the SBL build succeeded BUT we're in debug mode so the bootloader will halt to allow map validation
+    cli
     cli
 
 
@@ -214,17 +216,39 @@ stage4:
         inc dh
         mov [row], dh
 
-        ; first just try Fast A20:
+        ; Try each method in turn, verifying with an actual wraparound test after
+        ; each one, and only fall back to the keyboard controller (which may not
+        ; exist on legacy-free machines) if everything else failed.
+
+        ; 0. maybe it's already on (firmware / Haswell+)
+        call check_a20
+        jnz aftsA20
+
+        ; 1. BIOS
+        mov ax, 0x2401
+        int 0x15
+        call check_a20
+        jnz aftsA20
+
+        ; 2. Fast A20 (port 0x92)
         in al, 0x92
         test al, 2
-        jnz aftsA20
+        jnz .no_fast
         or al, 2
         and al, 0xFE
         out 0x92, al
+        .no_fast:
+        call check_a20_retry
+        jnz aftsA20
 
+        ; 3. Keyboard controller (every wait has a timeout)
         ; GOD KILL ME I FUCKING HATE BOOTLOADER DEVELOPMENT
         ; fuck it stealing from OSDev
         call enable_A20
+        call check_a20_retry
+        jnz aftsA20
+
+        jmp hang_a20 ; nothing worked; loading anything above 1MB would silently wrap
 
         aftsA20:
         jmp stage5
@@ -239,11 +263,20 @@ stage5:
 stage6:
     ; Set up the IDT and GDT
     setup_idt:
-        mov ecx, 256
+        ; Vectors 0-31 (CPU exceptions) except NMI go to exc_halt: several of them
+        ; push an error code (a bare iret would return to garbage) and faults would
+        ; just re-execute forever. NMI and 32-255 keep the plain iret stub.
+        o32 xor ecx, ecx            ; ecx = vector number
         lea edi, [IDT]
-    
+
     .loop69:
         mov eax, shit_isr
+        cmp ecx, 32
+        jae .gotisr
+        cmp ecx, 2                  ; NMI: harmless to return from
+        je .gotisr
+        mov eax, exc_halt
+    .gotisr:
         mov word [edi], ax
         mov word [edi+2], 0x08
         mov byte [edi+4], 0
@@ -252,8 +285,9 @@ stage6:
         mov word [edi+6], ax
 
         add edi, 8
-        dec ecx
-        jnz .loop69
+        inc ecx
+        cmp ecx, 256
+        jb .loop69
     
     o32 mov eax, GDT_DESC
     o32 mov ecx, 0x900
@@ -287,49 +321,153 @@ hang:
     hlt
     jmp hang
     
-enable_A20: ; no comments fuck you
+; Keyboard-controller A20 enable. Every wait times out (CF=1), so a missing
+; 8042 (port 0x64 floats to 0xFF on legacy-free hardware) can't hang us.
+enable_A20:
+    pushf
     cli
 
     call    a20wait
-    mov     al,0xAD
+    jc      .done               ; no controller at all
+    mov     al,0xAD             ; disable keyboard
     out     0x64,al
 
     call    a20wait
-    mov     al,0xD0
+    jc      .reenable
+    mov     al,0xD0             ; read output port
     out     0x64,al
 
     call    a20wait2
+    jc      .reenable
     in      al,0x60
-    push    ax
+    mov     ah, al              ; a20wait* only clobber AL
 
     call    a20wait
-    mov     al,0xD1
+    jc      .reenable
+    mov     al,0xD1             ; write output port
     out     0x64,al
 
     call    a20wait
-    pop     ax
+    jc      .reenable
+    mov     al, ah
     or      al,2
     out     0x60,al
 
+    .reenable:
     call    a20wait
-    mov     al,0xAE
+    mov     al,0xAE             ; re-enable keyboard
     out     0x64,al
 
-    sti
+    .done:
+    popf
     ret
 
+; wait for the 8042 input buffer to drain; CF=1 on timeout
 a20wait:
+    o32 push ecx
+    o32 mov ecx, 0x100000
+    .spin:
     in      al,0x64
     test    al,2
-    jnz     a20wait
+    jz      .ok
+    o32 dec ecx
+    jnz     .spin
+    o32 pop ecx
+    stc
+    ret
+    .ok:
+    o32 pop ecx
+    clc
     ret
 
-
+; wait for the 8042 output buffer to fill; CF=1 on timeout
 a20wait2:
+    o32 push ecx
+    o32 mov ecx, 0x100000
+    .spin:
     in      al,0x64
     test    al,1
-    jz      a20wait2
+    jnz     .ok
+    o32 dec ecx
+    jnz     .spin
+    o32 pop ecx
+    stc
     ret
+    .ok:
+    o32 pop ecx
+    clc
+    ret
+
+; Wraparound test: writes 0x0000:0x0500 and 0xFFFF:0x0510 (= 0x100500).
+; If they alias, A20 is off. Returns ZF=0 (jnz) when A20 is ON, ZF=1 when OFF.
+; Preserves everything except flags.
+check_a20:
+    push ax
+    push bx
+    push ds
+    push es
+    push si
+    push di
+    pushf
+    cli
+
+    xor ax, ax
+    mov es, ax
+    not ax
+    mov ds, ax                  ; real-mode load: base 0xFFFF0, cached limit kept
+    mov di, 0x0500
+    mov si, 0x0510
+
+    mov bl, [es:di]             ; save both original bytes
+    mov bh, [ds:si]
+
+    mov byte [es:di], 0x00
+    mov byte [ds:si], 0xFF
+    mov al, [es:di]             ; 0xFF here means the write to 1MB+ wrapped
+
+    mov [ds:si], bh             ; restore (if wrapped these are the same byte,
+    mov [es:di], bl             ;  and BL == BH, so the order doesn't matter)
+
+    popf                        ; restore IF before producing the result flag
+    cmp al, 0xFF                ; ZF=1 -> wrapped -> A20 off; ZF=0 -> on
+
+    pop di                      ; pops don't touch flags
+    pop si
+    pop es
+    pop ds
+    pop bx
+    pop ax
+    ret
+
+; check_a20 a few times; some chipsets take a moment after port 0x92 / 8042 writes
+check_a20_retry:
+    push cx
+    mov cx, 0x1000
+    .again:
+    call check_a20
+    jnz .done
+    loop .again
+    cmp cx, cx                  ; ZF=1: still off
+    .done:
+    pop cx
+    ret
+
+hang_a20:
+    cli
+    mov ah, 0x13
+    mov al, 0x01
+    mov bh, 0
+    mov bl, 0x07
+    mov dh, [row]
+    xor dl, dl
+    mov cx, m13l
+    push ds
+    pop es
+    mov bp, m13
+    int 0x10
+    .halt:
+    hlt
+    jmp .halt
 
 hang_dbg:
     hlt
@@ -389,6 +527,9 @@ m6l equ $ - m6
 m8 db 'Enabling A20!', 0x0a, 0x0d, 0x00
 m8l equ $ - m8
 
+m13 db 'E: Could not enable A20 (BIOS, port 0x92 and 8042 all failed).', 0x0a, 0x0d, 0x00
+m13l equ $ - m13
+
 m11 db "E: get this fucking function to work you idiot", 0x0a, 0x0d, 0x00
 m11l equ $ - m11
 
@@ -413,7 +554,16 @@ s3_sectors equ 78
 ImpArea equ $
 
 shit_isr:
-    iret
+    iret        ; CF: decodes as IRETD when run from the 32-bit code segment
+
+; Placeholder for CPU exceptions until the kernel installs its own IDT.
+; Never returns, so the error code some exceptions push doesn't matter.
+; cli/hlt/jmp short encode identically in 16- and 32-bit code.
+exc_halt:
+    cli
+    .halt:
+    hlt
+    jmp short .halt
 
 GDT_START:
     dq 0                    ; HAS TO BE NULL

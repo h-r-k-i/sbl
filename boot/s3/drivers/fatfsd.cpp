@@ -315,6 +315,10 @@ FAT12::FAT12(Disk& disk, uint32_t partitionLBA) : FAT(disk, partitionLBA) {
     SectorsPerCluster = vbr->bpb.SectorsPerCluster;
     SectorsPerFAT = vbr->bpb.SectorsPerFAT16;
     RootEntryCount = vbr->bpb.RootDirEntries;
+    if (BytesPerSector == 0 || SectorsPerCluster == 0) {
+        BytesPerSector = 0;
+        return; // garbage BPB; dividing by these would fault
+    }
 
     FATStartLBA = PartitionLBA + vbr->bpb.ReservedSectors;
     RootDirectoryLBA = FATStartLBA + vbr->bpb.FATCount * SectorsPerFAT;
@@ -322,7 +326,12 @@ FAT12::FAT12(Disk& disk, uint32_t partitionLBA) : FAT(disk, partitionLBA) {
     DataStartLBA = RootDirectoryLBA + RootDirectorySectors;
 
     uint32_t totalSectors = vbr->bpb.TotalSectors16 ? vbr->bpb.TotalSectors16 : vbr->bpb.TotalSectors32;
-    ClusterCount = (totalSectors - (vbr->bpb.ReservedSectors + vbr->bpb.FATCount * SectorsPerFAT + RootDirectorySectors)) / SectorsPerCluster;
+    uint32_t overhead = vbr->bpb.ReservedSectors + vbr->bpb.FATCount * SectorsPerFAT + RootDirectorySectors;
+    if (overhead >= totalSectors) {
+        BytesPerSector = 0;
+        return;
+    }
+    ClusterCount = (totalSectors - overhead) / SectorsPerCluster;
 
     if (ClusterCount > 4084) {
         BytesPerSector = 0;
@@ -371,15 +380,24 @@ FAT16::FAT16(Disk& disk, uint32_t partitionLBA) : FAT(disk, partitionLBA) {
     SectorsPerCluster = vbr->bpb.SectorsPerCluster;
     SectorsPerFAT = vbr->bpb.SectorsPerFAT16;
     RootEntryCount = vbr->bpb.RootDirEntries;
+    if (BytesPerSector == 0 || SectorsPerCluster == 0) {
+        BytesPerSector = 0;
+        return; // garbage BPB; dividing by these would fault
+    }
 
     FATStartLBA = PartitionLBA + vbr->bpb.ReservedSectors;
     RootDirectoryLBA = FATStartLBA + vbr->bpb.FATCount * SectorsPerFAT;
     RootDirectorySectors = (RootEntryCount * 32 + BytesPerSector - 1) / BytesPerSector;
     DataStartLBA = RootDirectoryLBA + RootDirectorySectors;
-    
-    uint32_t totalSectors = vbr->bpb.TotalSectors16 ? vbr->bpb.TotalSectors16 : vbr->bpb.TotalSectors32;
 
-    ClusterCount = (totalSectors- (vbr->bpb.ReservedSectors + vbr->bpb.FATCount * SectorsPerFAT + RootDirectorySectors)) / SectorsPerCluster;
+    uint32_t totalSectors = vbr->bpb.TotalSectors16 ? vbr->bpb.TotalSectors16 : vbr->bpb.TotalSectors32;
+    uint32_t overhead = vbr->bpb.ReservedSectors + vbr->bpb.FATCount * SectorsPerFAT + RootDirectorySectors;
+    if (overhead >= totalSectors) {
+        BytesPerSector = 0;
+        return;
+    }
+
+    ClusterCount = (totalSectors - overhead) / SectorsPerCluster;
     
     if (ClusterCount <= 4084 || ClusterCount >= 65525) {
         BytesPerSector = 0;
@@ -421,6 +439,10 @@ FAT32::FAT32(Disk& disk, uint32_t partitionLBA) : FAT(disk, partitionLBA) {
     SectorsPerCluster = vbr->bpb.SectorsPerCluster;
     SectorsPerFAT = vbr->ebr.fat32ebr.SectorsPerFAT32;
     RootEntryCount = vbr->bpb.RootDirEntries;
+    if (BytesPerSector == 0 || SectorsPerCluster == 0) {
+        BytesPerSector = 0;
+        return; // garbage BPB; dividing by these would fault
+    }
 
     FATStartLBA = PartitionLBA + vbr->bpb.ReservedSectors;
     RootDirectoryLBA = FATStartLBA + vbr->bpb.FATCount * SectorsPerFAT;
@@ -439,9 +461,14 @@ FAT32::FAT32(Disk& disk, uint32_t partitionLBA) : FAT(disk, partitionLBA) {
     }
     
     uint32_t totalSectors = vbr->bpb.TotalSectors16 ? vbr->bpb.TotalSectors16 : vbr->bpb.TotalSectors32;
+    uint32_t overhead = vbr->bpb.ReservedSectors + vbr->bpb.FATCount * SectorsPerFAT + RootDirectorySectors;
+    if (overhead >= totalSectors) {
+        BytesPerSector = 0;
+        return; // otherwise the subtraction underflows into a huge "valid" FAT32 cluster count
+    }
 
-    ClusterCount = (totalSectors - (vbr->bpb.ReservedSectors + vbr->bpb.FATCount * SectorsPerFAT + RootDirectorySectors)) / SectorsPerCluster;
-    
+    ClusterCount = (totalSectors - overhead) / SectorsPerCluster;
+
     if (ClusterCount < 65525) {
         BytesPerSector = 0;
         return;

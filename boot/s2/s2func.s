@@ -73,11 +73,12 @@ SBL_E820:
     jmp .SBL_E820_END
 
     .e820_error1:
+        ; CF set: the buffer does NOT hold a valid entry. Return 0x80xx (xx = AH)
+        ; so the caller can tell this apart from 1 ("last entry, and it's valid").
+        ; On the first call this means E820 is unsupported; on later calls it
+        ; is how some BIOSes signal the end of the list.
         mov al, ah
-        xor ah, ah
-        test ax, ax
-        jnz .SBL_E820_END
-        mov ax, 0x0001 ; return error code 1 to indicate E820 may have actually succeeded
+        mov ah, 0x80
         jmp .SBL_E820_END
 
     .e820_error2:

@@ -223,7 +223,7 @@ typedef struct __attribute__((packed)) {
 } SBL_TempBMM;
 
 
-uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { // uint16_t idt_location, uint16_t idt_handler_loc, uint16_t gdt_location
+uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize, uint16_t s3Sectors) { // uint16_t idt_location, uint16_t idt_handler_loc, uint16_t gdt_location
 
     // build SBL data structure at the specified location
     uint64_t* head_64 = (uint64_t*)location;
@@ -251,12 +251,28 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
     tempBMM.PM_IVT_GDT.size = impAreaSize;
     tempBMM.ContractArea.location = location;
 
-    tempBMM.S2.location = 0x1000;
-    tempBMM.S2.size = 0x4000 - 0x1000;
+    // S2 spans 0x1000-0x3FFF, but the GDT/IDT/ISR area (impArea) sits inside it and must
+    // survive into the kernel. The map has one S2 slot, so report only the larger free
+    // piece on either side of impArea; marking all of S2 FREE would let the kernel reuse
+    // the memory its GDT/IDT live in.
+    {
+        const uint32_t s2Start = 0x1000, s2End = 0x4000;
+        const uint32_t impEnd = (uint32_t)impArea + impAreaSize;
+        const uint32_t lowFree = (impArea > s2Start) ? (uint32_t)impArea - s2Start : 0;
+        const uint32_t highFree = (impEnd < s2End) ? s2End - impEnd : 0;
+        if (highFree >= lowFree) {
+            tempBMM.S2.location = impEnd;
+            tempBMM.S2.size = highFree;
+        }
+        else {
+            tempBMM.S2.location = s2Start;
+            tempBMM.S2.size = lowFree;
+        }
+    }
     tempBMM.S1.location = 0x7C00;
     tempBMM.S1.size = 512;
     tempBMM.S3.location = 0x8000;
-    tempBMM.S3.size = 48 * 512;
+    tempBMM.S3.size = (uint32_t)s3Sectors * 512; // passed from s2.s so it can't drift from the actual read
 
     SBL_Node* MapNode;
 
@@ -277,54 +293,65 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
     SBL_E820_Header* header = (SBL_E820_Header*)(SBL_NodeMap->data & 0xFFFF); // thank you 32-bit pointers
     header->magic = 0xE820; // We're being hopeful right now and assuming this system isn't fucking ancient
     header->entry_count = 1; // Amount of entries, updated later
-    uint32_t segment_offset = 0x0000 << 16 | (uint16_t)(&header->first); // segment:offset or smth idfk this is bullshit
+    // Entries start at &header->first (offset 4), so the real header is 2 * uint16_t.
+    const uint16_t e820_base = (uint16_t)(&header->first);
     uint32_t continuation_val = 0; // initial continuation value is always 0 when starting and will be 0 when the map is done
-    uint16_t resb = SBL_E820(segment_offset, &continuation_val);
+    uint16_t e820_count = 0;
+    uint16_t resb;
 
-    if (!resb && continuation_val != 0) {
+    // SBL_E820 returns:
+    //   0      entry written, more entries follow
+    //   1      entry written, this was the last one (EBX == 0 or repeated)
+    //   0x80xx carry set (AH = xx); the buffer is NOT a valid entry. On the
+    //          first call this means "unsupported", afterwards "end of list".
+    //   0xFFFF bad SMAP signature; the buffer is NOT a valid entry.
+    // Only codes 0 and 1 count an entry, so a CF-terminated list keeps every
+    // entry it already returned instead of being thrown away.
+    do {
+        resb = SBL_E820((uint32_t)(e820_base + E820_ENTRY_SIZE * e820_count), &continuation_val);
+        if (resb == 0 || resb == 1) e820_count++;
+    } while (resb == 0 && e820_count < E820_MAX_ENTRIES);
+
+    if (e820_count > 0) {
         bootloader_header->flags |= 0x1ULL;
-        do {
-            header->entry_count++;
-            segment_offset += E820_ENTRY_SIZE;
-            resb = SBL_E820(segment_offset, &continuation_val);
-            if (resb != 14 && resb) break;
-        } while (continuation_val != 0 && header->entry_count < E820_MAX_ENTRIES);
-        SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 2 * sizeof(uint16_t) + E820_ENTRY_SIZE * header->entry_count);
-        tempBMM.MemoryMap.size = sizeof(SBL_E820_Header) + E820_ENTRY_SIZE * header->entry_count;
-    }
-    if (resb) switch (resb) {
-        case 1:
-            // E820 may have actually succeeded
-            if (header->entry_count > 1) break; // if we have more than one entry we're probably good
-        default:
-            {
-                bootloader_header->sgalf |= 0x1ULL; // Mark memory map as being shid
-                SBL_E801_Map* e801_map = (SBL_E801_Map*)(SBL_NodeMap->data & 0xFFFF);
-                e801_map->magic = 0xE801; // Magic number for E801 map
-                segment_offset = 0x0000 << 16 | (uint16_t)(&e801_map->extended_memory_1k); // start of the memory info
-                resb = SBL_E801(segment_offset); // god help us all
-                if (!resb) {
-                    bootloader_header->flags |= 0x1ULL; // Mark decent memory map as successfully built
-                    SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 5 * sizeof(uint16_t));
-                    tempBMM.MemoryMap.size = sizeof(SBL_E801_Map);
-                    break;
-                }
-                // there is no god
-                SBL_88_Map* sbl88 = (SBL_88_Map*)(SBL_NodeMap->data & 0xFFFF);
-                sbl88->magic = 0x0088; // Magic number for SBL 88 map
-                segment_offset = 0x0000 << 16 | (uint16_t)(&sbl88->memory_above_1M); // start of the memory info
-                resb = SBL_88(segment_offset);
-                if (!resb) {
-                    tempBMM.MemoryMap.size = sizeof(SBL_88_Map);
-                    SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 2 * sizeof(uint16_t));
-                    break;
-                }
-                bootloader_header->sgalf &= (~0x0001);
-                return RETVAL; // gen atp wtf are we supposed to do
-            }
+        header->entry_count = e820_count;
+        SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 2 * sizeof(uint16_t) + E820_ENTRY_SIZE * e820_count);
+        tempBMM.MemoryMap.size = 2 * sizeof(uint16_t) + E820_ENTRY_SIZE * e820_count;
     }
     else {
-        SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 2 * sizeof(uint16_t) + E820_ENTRY_SIZE * E820_MAX_ENTRIES);
+        bootloader_header->sgalf |= 0x1ULL; // Mark memory map as degraded (E820 unavailable)
+        SBL_E801_Map* e801_map = (SBL_E801_Map*)(SBL_NodeMap->data & 0xFFFF);
+        e801_map->magic = 0xE801; // Magic number for E801 map
+        uint32_t segment_offset = 0x0000 << 16 | (uint16_t)(&e801_map->extended_memory_1k); // start of the memory info
+        resb = SBL_E801(segment_offset); // god help us all
+        if (!resb) {
+            bootloader_header->flags |= 0x1ULL; // Mark decent memory map as successfully built
+            SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 5 * sizeof(uint16_t));
+            tempBMM.MemoryMap.size = sizeof(SBL_E801_Map);
+        }
+        else {
+            // there is no god
+            SBL_88_Map* sbl88 = (SBL_88_Map*)(SBL_NodeMap->data & 0xFFFF);
+            sbl88->magic = 0x0088; // Magic number for SBL 88 map
+            segment_offset = 0x0000 << 16 | (uint16_t)(&sbl88->memory_above_1M); // start of the memory info
+            resb = SBL_88(segment_offset);
+            if (!resb) {
+                bootloader_header->flags |= 0x1ULL;
+                tempBMM.MemoryMap.size = sizeof(SBL_88_Map);
+                SBL_NodeMap->next = ((uint16_t)(SBL_NodeMap) + sizeof(SBL_Node) + 2 * sizeof(uint16_t));
+            }
+            else {
+                // No memory map at all. Record that and keep going so the rest of the
+                // contract (checksum, BMM, identity) is still built and valid; the kernel's
+                // flag check in S3 will refuse kernels that need a memory map.
+                bootloader_header->flags &= ~0x1ULL;
+                bootloader_header->sgalf |= 0x1ULL;
+                SBL_NodeMap->data = 0x0000;
+                tempBMM.MemoryMap.location = 0;
+                tempBMM.MemoryMap.size = 0;
+                SBL_NodeMap->next = (uint16_t)(SBL_NodeMap) + sizeof(SBL_Node);
+            }
+        }
     }
 
     // Build long mode and entropy info (later other cpu features... maybe?)
@@ -511,16 +538,19 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
     int nodeSize = sizeof(SBL_DisplayInfoBlock);
     if (((rest & 0xFF00) == 0) && (rest & 0xFF) == 0x4F) {
         bootloader_header->flags |= 1ULL << 17;
-        dib->VGAPointer = (uint32_t)&vbe;
         VBEModeInfoBlock* vbeMib = (VBEModeInfoBlock*)(0x9000);
         uint32_t vbeModePointer = (vbe.VideoModePtr[1] << 4) + vbe.VideoModePtr[0];
         uint32_t vbeDataPointer = (SBL_NodeMap->data + nodeSize);
+        // Node layout: [DIB][count * VBEModeInfoBlock][VBEInfoBlock]. `vbe` lives on this
+        // function's stack, so the persistent copy goes in the reserved slot at the end.
+        dib->count = 1;
+        VBEInfoBlock* vbeCopy = (VBEInfoBlock*)(vbeDataPointer + dib->count * sizeof(VBEModeInfoBlock));
+        dib->VGAPointer = (uint32_t)vbeCopy;
 
         tempBMM.DisplayInfoBlock.location = dib->VGAPointer;
         tempBMM.DisplayInfoBlock.size = sizeof(VBEInfoBlock);
 
         dib->VGAModePointer = vbeDataPointer;
-        dib->count = 1;
         uint32_t parity = UINT32_MAX;
         uint32_t size = 0;
         
@@ -547,6 +577,25 @@ uint16_t sbl_build(uint16_t location, uint16_t impArea, uint16_t impAreaSize) { 
                 
             }
             // SBL_memcpy((void*)vbeDataPointer, &vbeMib, 256);
+        }
+
+        // Persist the VBE info block. VBE 2.0+ BIOSes often put the mode list and OEM
+        // strings inside the caller's 512-byte buffer, so any far pointer that points
+        // into the old stack copy is rebased onto the persistent copy.
+        SBL_memcpy(vbeCopy, &vbe, sizeof(VBEInfoBlock));
+        {
+            const uint32_t oldBase = (uint32_t)&vbe;
+            const uint32_t newBase = (uint32_t)vbeCopy;
+            // byte offsets of the seg:off far pointers in the VBE info block
+            static const uint8_t farPtrOffsets[] = { 0x06, 0x0E, 0x16, 0x1A, 0x1E };
+            for (uint8_t k = 0; k < sizeof(farPtrOffsets); k++) {
+                uint16_t* fp = (uint16_t*)((uint8_t*)vbeCopy + farPtrOffsets[k]);
+                uint32_t linear = ((uint32_t)fp[1] << 4) + fp[0];
+                if (linear < oldBase || linear >= oldBase + sizeof(VBEInfoBlock)) continue;
+                uint32_t moved = linear - oldBase + newBase; // < 64K, so segment 0 works
+                fp[0] = (uint16_t)moved;
+                fp[1] = 0;
+            }
         }
 
         SBL_memcpy(dib->Signature, "visbvisbvisbvisb", 16);
