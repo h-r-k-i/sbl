@@ -18,6 +18,7 @@
 #include "elf.hpp"
 #include "sblheader.hpp"
 #include "protected.hpp"
+#include "vmode.hpp"
 
 #ifdef BUILD_DEBUG
     #define DEBUG
@@ -56,6 +57,11 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
         // video[2 + 80 * 3] = (0x0F << 8) | LEFT_BRACKET;
         // video[3 + 80 * 3] = (0x0F << 8) | SEVEN;
         // video[4 + 80 * 3] = (0x0F << 8) | RIGHT_BRACKET;
+        SBL_DisplayInfoBlock* vib = nullptr;
+        SBLMapResult res = SBL_FindVisualArea(ebx, vib);
+        bool CanSetVideoMode = false;
+        if (res != SBLMapResult::Good) printk("W: Failed to find the visual area in Arc-C map.\nThe display may be trapped in text mode.\n");
+        else CanSetVideoMode = true;
 
         printk("Please type the 8.3 directory of the kernel you want to boot,\n");
         printk("or enter Q to shut down the device.\n");
@@ -271,6 +277,7 @@ void s3_main(uint32_t eax, uint32_t ebx, uint32_t edx) {
                 printk("Failed to get PM_IVT_GDT area from bootloader map.\n");
                 hang();
             }
+            if (CanSetVideoMode) SetVideoMode(vib->fhd);
             RunKernel(KernelLoadPoint, eax, ebx, (uint16_t)(pmArea.address));
             printk("Failed to jump to kernel. This shouldn't appear.\n");
             printk("Please report this to issue@harukimedia.org.\n");

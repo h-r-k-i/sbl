@@ -34,8 +34,52 @@ typedef struct __attribute__((packed)) {
     uint16_t memory_above_1M;
 } SBL_88_Map;
 
+typedef struct __attribute__((packed)) {
+    char Signature[16];
+    uint16_t size;
+    uint32_t VGAPointer;
+    uint32_t count;
+    uint32_t VGAModePointer;
+    uint16_t fhd;
+    char resv[16];
+} SBL_DisplayInfoBlock;
 
+static_assert(sizeof(SBL_DisplayInfoBlock) % 16 == 0, "SBL Display Info Block structure is not a multiple of 16 bytes");
 
+typedef struct __attribute__((packed)) {
+    uint16_t Attributes;
+    uint8_t Window_A;
+    uint8_t Window_B;
+    uint16_t Granularity;
+    uint16_t WindowSize;
+    uint16_t Segment_A;
+    uint16_t Segment_B;
+    uint32_t WinFuncPtr;
+    uint16_t Pitch;
+    uint16_t Width;
+    uint16_t Height;
+    uint8_t WChar;
+    uint8_t YChar;
+    uint8_t Planes;
+    uint8_t bpp;
+    uint8_t Banks;
+    uint8_t MemoryModel;
+    uint8_t BankSize;
+    uint8_t ImagePages;
+    uint8_t resv1;
+    uint8_t RedMask;
+    uint8_t RedPosition;
+    uint8_t GreenMask;
+    uint8_t GreenPosition;
+    uint8_t BlueMask;
+    uint8_t BluePosition;
+    uint16_t resv2;
+    uint8_t DirectColorAttributes;
+    uint32_t FramebufferAddress;
+    uint32_t OffScreenMemOffset;
+    uint16_t OffScreenMemSize;
+    uint8_t resv3[206];
+} VBEModeInfoBlock;
 
 #define SBL_BOOTLOADER_MAP_COUNT 13
 #define SBL_BOOTLOADER_FREE      1
@@ -44,6 +88,7 @@ typedef struct __attribute__((packed)) {
 #define SBL_BOOTLOADER_CRITICAL  4
 
 #define SBL_FLAG_BMM_COMPLETE (1ULL << 62)
+#define SBL_FLAG_VIS_COMPLETE (1ULL << 17)
 
 enum class SBL_BMMIndex : uint8_t {
     IVT_BDA          = 0,
@@ -90,10 +135,16 @@ enum class SBLMapResult {
 };
 
 static const char BMM_SIGNATURE[16] = "bmm.bmm.bmm.bmm";
+static const char DISPLAY_SIGNATURE[16] = {'v','i','s','b','v','i','s','b','v','i','s','b','v','i','s','b'};
 static const uint16_t MAX_NODES = 64;
 
 static bool SignatureMatches(const char* p) {
     for (uint8_t i = 0; i < sizeof(BMM_SIGNATURE); i++) if (p[i] != BMM_SIGNATURE[i]) return false;
+    return true;
+}
+
+static bool SignatureMatchesDisplay(const char* p) {
+    for (uint8_t i = 0; i < sizeof(DISPLAY_SIGNATURE); i++) if (p[i] != DISPLAY_SIGNATURE[i]) return false;
     return true;
 }
 
@@ -115,6 +166,32 @@ SBLMapResult SBL_FindBMM(uint32_t sblData, SBL_BMM*& bmm) {
         if (node->data != 0 && SignatureMatches((const char*)(uint32_t)node->data)) {
             bmm = (SBL_BMM*)(uint32_t)node->data;
             if (bmm->count != SBL_BOOTLOADER_MAP_COUNT) return SBLMapResult::BadMapCount;
+            return SBLMapResult::Good;
+        }
+        nodeAddr = node->next;
+    }
+    return SBLMapResult::MapNotFound;
+}
+
+SBLMapResult SBL_FindVisualArea(uint32_t sblData, SBL_DisplayInfoBlock*& vib) {
+    vib = nullptr;
+    SBL_Data* header = (SBL_Data*)sblData;
+
+    const char* magic = "NEKONEKO";
+    for (uint8_t i = 0; i < 8; i++) if (header->magic[i] != magic[i]) return SBLMapResult::BadMagic;
+
+    uint64_t sum = *(uint64_t*)(header->magic) + header->flags + header->sgalf + header->checksum;
+    if (sum != 0xFFFFFFFFFFFFFFFFULL) return SBLMapResult::BadChecksum;
+
+    if ((header->flags & SBL_FLAG_VIS_COMPLETE) == 0) return SBLMapResult::MapIncomplete;
+
+    uint16_t nodeAddr = (uint16_t)header->first;
+    for (uint16_t n = 0; n < MAX_NODES && nodeAddr != 0; n++) {
+        SBL_Node* node = (SBL_Node*)(uint32_t)nodeAddr;
+        if (node->data != 0 && SignatureMatchesDisplay((const char*)(uint32_t)node->data)) {
+            vib = (SBL_DisplayInfoBlock*)(uint32_t)node->data;
+            if (vib->fhd == 0xFFFF) return SBLMapResult::BadStatus;
+            if (vib->size != sizeof(SBL_DisplayInfoBlock)) return SBLMapResult::BadRange;
             return SBLMapResult::Good;
         }
         nodeAddr = node->next;
