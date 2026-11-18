@@ -1,166 +1,133 @@
 CC  = ~/opt/cross/bin/x86_64-elf-gcc
 CXX = ~/opt/cross/bin/x86_64-elf-g++
-AS  = ~/opt/cross/bin/x86_64-elf-as
 LD  = ~/opt/cross/bin/x86_64-elf-ld
 OBJ = ~/opt/cross/bin/x86_64-elf-objcopy
 
-CFLAGS = -ffreestanding -O2 -Wall -Wextra \
-    	 -fno-omit-frame-pointer -fno-stack-protector -fno-pie \
-		 -nostdlib -mno-red-zone -mcmodel=large \
-		 -I./boot/s3/include -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include
+GCC_INCLUDE = /home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include
+GXX_INCLUDE = /home/renee/opt/cross/bin/x86_64-elf/include/c++/15.2.0
+
+S2_CFLAGS = -ffreestanding -m16 -mgeneral-regs-only -O1 -I$(GCC_INCLUDE)
+
 CXXFLAGS = -ffreestanding -Wall -Wextra -fno-exceptions \
 		   -fno-rtti -m16 -mgeneral-regs-only \
-		   -ffreestanding -I./boot/s3/include -DBUILD_DEBUG -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include \
-		   -I/home/renee/opt/cross/bin/x86_64-elf/include/c++/15.2.0 -fno-omit-frame-pointer -fno-stack-protector \
+		   -I./boot/s3/include -DBUILD_DEBUG -I$(GCC_INCLUDE) -I$(GXX_INCLUDE) \
+		   -fno-omit-frame-pointer -fno-stack-protector \
 		   -fno-pie -nostdlib -mno-red-zone
-LDFLAGS = -nostdlib --oformat binary
-
-KERNEL_CFLAGS = -ffreestanding -O2 -Wall -Wextra \
-		        -fno-stack-protector -fno-pie -fno-pic \
-				-m32 -mgeneral-regs-only -I./boot/s3/include -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include
-
-KERNEL_LDFLAGS = -m elf_i386 -nostdlib
 
 BUILD_BIN = build
 
+# ---- Stage 1 ----
 BOOT1_ASM = ./boot/s1.s
-BOOT2_ASM = ./boot/s2/s2.s
-BOOT2_C   = ./boot/s2/s2.c
-BOOT2_BIN  = ./$(BUILD_BIN)/s2.bin
+BOOT1_BIN = ./$(BUILD_BIN)/s1.bin
+
+# ---- Stage 2 ----
+BOOT2_ASM     = ./boot/s2/s2.s
+BOOT2_C       = ./boot/s2/s2.c
+BOOT2_HELPASM = ./boot/s2/s2func.s
+BOOT2_LD      = ./boot/s2/s2.ld
 
 BOOT2_OBJ  = ./$(BUILD_BIN)/s2.o
 BOOT2_COBJ = ./$(BUILD_BIN)/s2.c.o
+BOOT2_HLP  = ./$(BUILD_BIN)/s2func.o
 BOOT2_ELF  = ./$(BUILD_BIN)/s2.elf
+BOOT2_BIN  = ./$(BUILD_BIN)/s2.bin
 
-BOOT2_HELPASM = ./boot/s2/s2func.s
-BOOT2_HLP = ./$(BUILD_BIN)/s2func.o
-
-BOOT2_LD = ./boot/s2/s2.ld
-
-BOOT3_ASM = ./boot/s3/s3.s
-BOOT3_C	  = ./boot/s3/s3.cpp
-BOOT3_D   = $(wildcard ./boot/s3/drivers/*.cpp)
-KERNEL_C  = ./bin/neko.c
-KERNEL_CPP =
-KERNEL_ASM =
-
-BOOT1_BIN = ./$(BUILD_BIN)/s1.bin
-BOOT2_BIN = ./$(BUILD_BIN)/s2.bin
-BOOT3_BIN = ./$(BUILD_BIN)/s3.bin
-
-BOOT_BIN   = boot.bin
-KERNEL_BIN = kernel.elf
-OS_IMG     = os.img
+# ---- Stage 3 ----
+BOOT3_ASM    = ./boot/s3/s3.s
+BOOT3_C      = ./boot/s3/s3.cpp
+BOOT3_D      = $(wildcard ./boot/s3/drivers/*.cpp)
+BOOT3_DRVASM = $(wildcard ./boot/s3/drivers/*.s)
+BOOT3_LD     = ./boot/s3/s3.ld
 
 BOOT3_OBJ  = ./$(BUILD_BIN)/s3.o
 BOOT3_COBJ = ./$(BUILD_BIN)/s3.cpp.o
-BOOT3_DRIV = $(patsubst ./boot/s3/drivers/%.cpp,./$(BUILD_BIN)/%.cpp.o, $(BOOT3_D))
-BOOT3_ELF  = ./$(BUILD_BIN)/s3.elf
-
-BOOT3_LD = ./boot/s3/s3.ld
-
-BOOT3_DRVASM = $(wildcard ./boot/s3/drivers/*.s)
+BOOT3_DRIV = $(patsubst ./boot/s3/drivers/%.cpp,./$(BUILD_BIN)/%.cpp.o,$(BOOT3_D))
 BOOT3_DRVO = $(patsubst ./boot/s3/drivers/%.s,./$(BUILD_BIN)/%.o,$(BOOT3_DRVASM))
+BOOT3_ELF  = ./$(BUILD_BIN)/s3.elf
+BOOT3_BIN  = ./$(BUILD_BIN)/s3.bin
 
-INITKERNEL = ./bin32/nekotest.s
-IK_OBJ = ./$(BUILD_BIN)/nekotest.o
+# ---- Outputs ----
+BOOT_BIN = sbl.bin
+DISK_IMG = sbl.img
 
-KERNEL = ./bin32/neko.c
-KERNEL_OBJ = ./$(BUILD_BIN)/neko.o
-KERNEL_LD = ./bin32/neko.ld
+# Optional: a kernel ELF to drop into /BOOT/ on the test image.
+# SBL asks for the path at boot, so this is purely for convenience.
+#   make KERNEL=path/to/kernel.elf
+#   make KERNEL=path/to/kernel.elf KERNEL_NAME=FOO.ELF
+KERNEL      ?=
+KERNEL_NAME ?= $(shell basename "$(KERNEL)" | tr a-z A-Z)
 
 ifdef S2_DEBUG
     S2_DEBUG_FLAG := -D$(S2_DEBUG)
-	
 endif
 
-#all:
-#	echo $(BOOT3_COBJ)
-
-all: $(BUILD_BIN) $(OS_IMG)
+all: $(BUILD_BIN) $(DISK_IMG)
 
 $(BUILD_BIN):
 	mkdir -p $(BUILD_BIN)
 
-$(BOOT1_BIN): $(BOOT1_ASM)
+# ---- Stage 1 ----
+$(BOOT1_BIN): $(BOOT1_ASM) | $(BUILD_BIN)
 	nasm -f bin $< -o $@
 
-$(BOOT2_OBJ): $(BOOT2_ASM)
+# ---- Stage 2 ----
+$(BOOT2_OBJ): $(BOOT2_ASM) | $(BUILD_BIN)
 	nasm -f elf32 $< -o $@
 
-$(BOOT2_COBJ): $(BOOT2_C)
-	$(CC) -ffreestanding -m16 -mgeneral-regs-only -O1 -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include $(S2_DEBUG_FLAG) -c $< -o $@
-
-$(BOOT2_HLP): $(BOOT2_HELPASM)
+$(BOOT2_HLP): $(BOOT2_HELPASM) | $(BUILD_BIN)
 	nasm -f elf32 $< -o $@
 
-$(BOOT2_ELF): $(BOOT2_OBJ) $(BOOT2_COBJ) $(BOOT2_LD) $(BOOT2_HLP)
+$(BOOT2_COBJ): $(BOOT2_C) | $(BUILD_BIN)
+	$(CC) $(S2_CFLAGS) $(S2_DEBUG_FLAG) -c $< -o $@
+
+$(BOOT2_ELF): $(BOOT2_OBJ) $(BOOT2_COBJ) $(BOOT2_HLP) $(BOOT2_LD)
 	$(LD) -m elf_i386 -T $(BOOT2_LD) -o $@ $(BOOT2_OBJ) $(BOOT2_COBJ) $(BOOT2_HLP) -Map=$(BUILD_BIN)/s2.map
 
 $(BOOT2_BIN): $(BOOT2_ELF)
 	$(OBJ) -O binary $< $@
 
-$(BOOT3_OBJ): $(BOOT3_ASM)
+# ---- Stage 3 ----
+$(BOOT3_OBJ): $(BOOT3_ASM) | $(BUILD_BIN)
 	nasm -f elf32 $< -o $@
 
-./$(BUILD_BIN)/%.o: ./boot/s3/drivers/%.s
+./$(BUILD_BIN)/%.o: ./boot/s3/drivers/%.s | $(BUILD_BIN)
 	nasm -f elf32 $< -o $@
 
-$(IK_OBJ): $(INITKERNEL)
-	nasm -f elf32 $< -o $@
-
-$(KERNEL_OBJ): $(KERNEL)
-	$(CC) -ffreestanding -I./boot/s3/include -I/home/renee/opt/cross/bin/lib/gcc/x86_64-elf/15.2.0/include -c $< -o $@
-
-./$(BUILD_BIN)/s3.cpp.o: $(BOOT3_C)
+$(BOOT3_COBJ): $(BOOT3_C) | $(BUILD_BIN)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-./$(BUILD_BIN)/%.cpp.o: ./boot/s3/drivers/%.cpp
+./$(BUILD_BIN)/%.cpp.o: ./boot/s3/drivers/%.cpp | $(BUILD_BIN)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BOOT3_ELF): $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_LD) $(BOOT3_DRVO)
-	$(LD) -m elf_i386 -T $(BOOT3_LD) -o $@ $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_DRVO)
+$(BOOT3_ELF): $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_DRVO) $(BOOT3_LD)
+	$(LD) -m elf_i386 -T $(BOOT3_LD) -o $@ $(BOOT3_OBJ) $(BOOT3_COBJ) $(BOOT3_DRIV) $(BOOT3_DRVO) -Map=$(BUILD_BIN)/s3.map
 
 $(BOOT3_BIN): $(BOOT3_ELF)
 	$(OBJ) -O binary $< $@
 
+# ---- Bootloader blob ----
 $(BOOT_BIN): $(BOOT1_BIN) $(BOOT2_BIN) $(BOOT3_BIN)
-	cat $(BOOT1_BIN) $(BOOT2_BIN) $(BOOT3_BIN) > $(BOOT_BIN) 
+	cat $^ > $@
 
-kernel.o: $(KERNEL_C)
-	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+# ---- Test disk image (MBR + FAT32 partition, SBL in the gap before it) ----
+$(DISK_IMG): $(BOOT_BIN) $(KERNEL)
+	dd if=/dev/zero of=$@ bs=1M count=512
+	printf 'label: dos\nstart=2048, type=c, bootable\n' | sfdisk $@
+	mkfs.fat -F 32 -n "SBL" --offset=2048 $@
+	dd if=$(BOOT_BIN) of=$@ bs=446 count=1 conv=notrunc
+	dd if=$(BOOT_BIN) of=$@ bs=512 skip=1 seek=1 conv=notrunc
+	mmd -i $@@@1048576 ::/BOOT
+ifneq ($(strip $(KERNEL)),)
+	mcopy -i $@@@1048576 $(KERNEL) ::/BOOT/$(KERNEL_NAME)
+endif
 
-consoleio.o: ./boot/s3/drivers/consoleio.cpp
-	$(CC) $(CFLAGS) -c ./boot/s3/drivers/consoleio.cpp -o consoleio.o
+run: $(DISK_IMG)
+	qemu-system-x86_64 -drive format=raw,file=$(DISK_IMG),if=ide -serial stdio -m 6G -d int,cpu_reset -no-reboot -D qemu.log -cpu host -accel kvm
 
-$(KERNEL_BIN): kernel.o $(IK_OBJ)
-	$(LD) $(KERNEL_LDFLAGS) -T $(KERNEL_LD) -Map=$(BUILD_BIN)/kernel.map -o $@ $(IK_OBJ) kernel.o
-
-# $(OS_IMG): $(BOOT_BIN) $(KERNEL_BIN)
-# 	dd if=/dev/zero of=$(OS_IMG) bs=512 count=131072
-# 	printf 'label: dos\nstart=2048, type=e, bootable\n' | sfdisk $(OS_IMG)
-# 	mkfs.fat -F 16 -n "Neko" --offset=2048 $(OS_IMG) # FAT16 because I can't be fucked to expand the drive size to one that can work with FAT32
-# 	dd if=$(BOOT_BIN) of=$(OS_IMG) bs=446 count=1 conv=notrunc
-# 	dd if=$(BOOT_BIN) of=$(OS_IMG) bs=512 skip=1 seek=1 conv=notrunc
-# 	mmd -i $(OS_IMG)@@1048576 ::/BOOT
-# 	mcopy -i $(OS_IMG)@@1048576 $(KERNEL_BIN) ::/BOOT/NEKO.ELF
-
-$(OS_IMG): $(BOOT_BIN) $(KERNEL_BIN)
-	dd if=/dev/zero of=$(OS_IMG) bs=1M count=512
-	printf 'label: dos\nstart=2048, type=c, bootable\n' | sfdisk $(OS_IMG)
-	mkfs.fat -F 32 -n "Neko" --offset=2048 $(OS_IMG)
-	dd if=$(BOOT_BIN) of=$(OS_IMG) bs=446 count=1 conv=notrunc
-	dd if=$(BOOT_BIN) of=$(OS_IMG) bs=512 skip=1 seek=1 conv=notrunc
-	mmd -i $(OS_IMG)@@1048576 ::/BOOT
-	mcopy -i $(OS_IMG)@@1048576 $(KERNEL_BIN) ::/BOOT/NEKO.ELF
-
-run: $(OS_IMG)
-	qemu-system-x86_64 -drive format=raw,file=$(OS_IMG),if=ide -serial stdio -m 6G -d int,cpu_reset -no-reboot -D qemu.log -cpu host -accel kvm
-
-debug: $(OS_IMG)
-	qemu-system-x86_64 -drive format=raw,file=$(OS_IMG),if=ide -serial stdio -s -S -m 1G -accel kvm -cpu host,+rdrand
+debug: $(DISK_IMG)
+	qemu-system-x86_64 -drive format=raw,file=$(DISK_IMG),if=ide -serial stdio -s -S -m 1G -accel kvm -cpu host,+rdrand
 
 clean:
-	rm -rf *.o *.bin $(OS_IMG) $(BUILD_BIN)
+	rm -rf $(BUILD_BIN) $(BOOT_BIN) $(DISK_IMG) qemu.log
 
 .PHONY: all run debug clean
